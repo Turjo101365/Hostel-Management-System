@@ -4,8 +4,9 @@ import Sidebar from './Sidebar'
 import Navbar from './Navbar'
 import Footer from './Footer'
 import AnimatedBackdrop from './AnimatedBackdrop'
+import { useAuth } from '../../auth/AuthContext'
 
-const pageTitles = {
+const adminPageTitles = {
   '/admin': 'Admin Dashboard',
   '/admin/students': 'Student Directory',
   '/admin/rooms': 'Room Directory',
@@ -19,10 +20,24 @@ const pageTitles = {
   '/admin/profile': 'Profile Settings',
 }
 
+const studentPageTitles = {
+  '/student': 'Student Dashboard',
+  '/student/rooms': 'Available Rooms',
+  '/student/blocks': 'Hostel Blocks',
+  '/student/payments': 'My Payments',
+  '/student/fees': 'Fee Structure',
+  '/student/mess': 'Mess Menu',
+  '/student/leaves': 'My Leave History',
+  '/student/profile': 'Student Profile',
+}
+
 const Layout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
+  const { user } = useAuth()
+  const pageTitles = user?.role === 'Student' ? studentPageTitles : adminPageTitles
   const title = pageTitles[location.pathname] || 'Hostel Management System'
+  const footerVariant = user?.role === 'Student' ? 'student' : 'admin'
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-gray-50 dark:bg-slate-900">
@@ -39,7 +54,7 @@ const Layout = () => {
           <Outlet />
         </main>
 
-        <Footer variant="admin" />
+        <Footer variant={footerVariant} />
       </div>
     </div>
   )

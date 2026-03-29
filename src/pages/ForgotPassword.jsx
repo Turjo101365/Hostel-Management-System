@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Mail, ArrowLeft, KeyRound } from 'lucide-react'
 import toast from 'react-hot-toast'
-import api from '../services/api'
+import api, { clearStoredSession } from '../services/api'
 import Input from '../components/common/Input'
 import Button from '../components/common/Button'
 import Card from '../components/common/Card'
@@ -16,6 +16,10 @@ const ForgotPassword = () => {
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    clearStoredSession()
+  }, [])
 
   const validateForm = () => {
     const newErrors = {}

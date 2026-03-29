@@ -19,12 +19,19 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
+import StudentDashboard from './pages/StudentDashboard'
+import StudentRooms from './pages/StudentRooms'
+import StudentBlocks from './pages/StudentBlocks'
+import StudentPayments from './pages/StudentPayments'
+import StudentFees from './pages/StudentFees'
+import StudentMessMenu from './pages/StudentMessMenu'
+import StudentLeaves from './pages/StudentLeaves'
 import ProtectedRoute from './auth/ProtectedRoute'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { ThemeProvider } from './theme/ThemeContext'
 
 const AppContent = () => {
-  const { isAuthenticated, loading } = useAuth()
+  const { isAuthenticated, loading, homePath } = useAuth()
 
   if (loading) return null // or a loading spinner
 
@@ -36,22 +43,38 @@ const AppContent = () => {
       <Route path="/contact" element={<Contact />} />
       <Route
         path="/login"
-        element={isAuthenticated ? <Navigate to="/admin" replace /> : <Login />}
+        element={isAuthenticated ? <Navigate to={homePath} replace /> : <Login />}
+      />
+      <Route
+        path="/login/admin"
+        element={isAuthenticated ? <Navigate to={homePath} replace /> : <Login forcedRole="Admin" />}
+      />
+      <Route
+        path="/login/student"
+        element={isAuthenticated ? <Navigate to={homePath} replace /> : <Login forcedRole="Student" />}
       />
       <Route
         path="/register"
-        element={isAuthenticated ? <Navigate to="/admin" replace /> : <Register />}
+        element={isAuthenticated ? <Navigate to={homePath} replace /> : <Register />}
+      />
+      <Route
+        path="/register/admin"
+        element={isAuthenticated ? <Navigate to={homePath} replace /> : <Register forcedRole="Admin" />}
+      />
+      <Route
+        path="/register/student"
+        element={isAuthenticated ? <Navigate to={homePath} replace /> : <Register forcedRole="Student" />}
       />
       <Route
         path="/forgot-password"
-        element={isAuthenticated ? <Navigate to="/admin" replace /> : <ForgotPassword />}
+        element={isAuthenticated ? <Navigate to={homePath} replace /> : <ForgotPassword />}
       />
       <Route
         path="/reset-password"
-        element={isAuthenticated ? <Navigate to="/admin" replace /> : <ResetPassword />}
+        element={isAuthenticated ? <Navigate to={homePath} replace /> : <ResetPassword />}
       />
 
-      <Route element={<ProtectedRoute />}>
+      <Route element={<ProtectedRoute allowedRoles={['Admin']} />}>
         <Route path="/admin" element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="dashboard" element={<Navigate to="/admin" replace />} />
@@ -79,7 +102,20 @@ const AppContent = () => {
         <Route path="/profile" element={<Navigate to="/admin/profile" replace />} />
       </Route>
 
-      <Route path="*" element={<Navigate to={isAuthenticated ? "/admin" : "/" } replace />} />
+      <Route element={<ProtectedRoute allowedRoles={['Student']} />}>
+        <Route path="/student" element={<Layout />}>
+          <Route index element={<StudentDashboard />} />
+          <Route path="rooms" element={<StudentRooms />} />
+          <Route path="blocks" element={<StudentBlocks />} />
+          <Route path="payments" element={<StudentPayments />} />
+          <Route path="fees" element={<StudentFees />} />
+          <Route path="mess" element={<StudentMessMenu />} />
+          <Route path="leaves" element={<StudentLeaves />} />
+          <Route path="profile" element={<ProfileSettings />} />
+        </Route>
+      </Route>
+
+      <Route path="*" element={<Navigate to={isAuthenticated ? homePath : '/' } replace />} />
     </Routes>
   )
 }

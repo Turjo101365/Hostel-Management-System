@@ -111,6 +111,16 @@ const ensureUserColumns = async () => {
     BEGIN
       ALTER TABLE Users ADD passwordResetExpiresAt DATETIME NULL;
     END;
+
+    IF COL_LENGTH('Users', 'role') IS NULL
+    BEGIN
+      ALTER TABLE Users ADD role NVARCHAR(20) NOT NULL CONSTRAINT DF_Users_Role DEFAULT 'Admin';
+    END;
+
+    IF COL_LENGTH('Users', 'studentId') IS NULL
+    BEGIN
+      ALTER TABLE Users ADD studentId INT NULL;
+    END;
   `);
 
   userColumnsEnsured = true;
@@ -479,6 +489,70 @@ const getDisplayName = (email) =>
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 const getUserName = (user) => normalizeString(user.fullName) || getDisplayName(user.email);
+const getUserRole = (user) => {
+  const normalizedRole = normalizeString(user?.role);
+  return normalizedRole === "Student" ? "Student" : "Admin";
+};
+const getUserHomePath = (role) => (role === "Student" ? "/student" : "/admin");
+const isAdminUser = (user) => getUserRole(user) === "Admin";
+const isStudentUser = (user) => getUserRole(user) === "Student";
+
+const getStudentProfileById = (studentId) =>
+  queryOne(
+    `
+      SELECT
+        s.Student_id AS student_id,
+        s.Name AS name,
+        s.Room_id AS room_id,
+        r.Room_Number AS room_number,
+        hb.Block_Name AS block_name,
+        s.Guardian_Contact AS guardian_contact
+      FROM Student s
+      LEFT JOIN Room r ON r.Room_id = s.Room_id
+      LEFT JOIN Hostel_Block hb ON hb.Block_id = r.Hostel_Block
+      WHERE s.Student_id = @studentId
+    `,
+    (request) => request.input("studentId", sql.Int, studentId)
+  );
+
+const buildStudentUser = async (user) => {
+  const studentId = parsePositiveInt(user.studentId);
+  const studentProfile = studentId ? await getStudentProfileById(studentId) : null;
+
+  return {
+    id: user.id,
+    email: user.email,
+    name: studentProfile?.name || getUserName(user),
+    phoneNumber: user.phoneNumber || null,
+    role: "Student",
+    studentId: studentProfile?.student_id || studentId || null,
+    roomId: studentProfile?.room_id || null,
+    roomNumber: studentProfile?.room_number || null,
+    blockName: studentProfile?.block_name || null,
+    guardianContact: studentProfile?.guardian_contact || null,
+  };
+};
+
+const getStudentAccountForRequest = async (req) => {
+  if (!req.user?.studentId) {
+    return null;
+  }
+
+  return getStudentProfileById(req.user.studentId);
+};
+
+const buildAdminUser = (user) => ({
+  id: user.id,
+  email: user.email,
+  name: getUserName(user),
+  phoneNumber: user.phoneNumber || null,
+  role: "Admin",
+  studentId: null,
+  roomId: null,
+  roomNumber: null,
+  blockName: null,
+  guardianContact: null,
+});
 
 const hashResetCode = (code) =>
   crypto.createHash("sha256").update(code).digest("hex");
@@ -551,17 +625,17 @@ const sendResetEmail = async ({ email, code, expiresAt }) => {
   };
 };
 
-const buildAuthPayload = (user) => {
-  const normalizedUser = {
-    id: user.id,
-    email: user.email,
-    name: getUserName(user),
-    phoneNumber: user.phoneNumber || null,
-    role: "Admin",
-  };
+const buildAuthPayload = async (user) => {
+  const role = getUserRole(user);
+  const normalizedUser = role === "Student" ? await buildStudentUser(user) : buildAdminUser(user);
 
   const token = jwt.sign(
-    { id: normalizedUser.id, email: normalizedUser.email, role: normalizedUser.role },
+    {
+      id: normalizedUser.id,
+      email: normalizedUser.email,
+      role: normalizedUser.role,
+      studentId: normalizedUser.studentId,
+    },
     JWT_SECRET,
     { expiresIn: "2h" }
   );
@@ -588,12 +662,42 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
+const requireAdmin = (req, res, next) => {
+  if (!isAdminUser(req.user)) {
+    res.status(403).json({ message: "Admin access is required for this action." });
+    return;
+  }
+
+  next();
+};
+
+const requireStudent = (req, res, next) => {
+  if (!isStudentUser(req.user)) {
+    res.status(403).json({ message: "Student access is required for this action." });
+    return;
+  }
+
+  next();
+};
+
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const validatePhoneNumber = (phoneNumber) => /^\+?[\d\s()-]{7,20}$/.test(phoneNumber);
+const withForcedRole = (role, handler) => async (req, res, next) => {
+  req.body = {
+    ...req.body,
+    role,
+  };
+
+  return handler(req, res, next);
+};
 
 const registerUser = async (req, res) => {
   const email = String(req.body.email || "").trim().toLowerCase();
   const password = String(req.body.password || "");
+  const role = normalizeString(req.body.role) === "Student" ? "Student" : "Admin";
+  const fullName = normalizeNullableString(req.body.name) || getDisplayName(email);
+  const phoneNumber = normalizeNullableString(req.body.phoneNumber);
+  const guardianContact = normalizeNullableString(req.body.guardian_contact);
 
   if (!validateEmail(email)) {
     res.status(400).json({ message: "Please enter a valid email address." });
@@ -602,6 +706,16 @@ const registerUser = async (req, res) => {
 
   if (password.length < 6) {
     res.status(400).json({ message: "Password must be at least 6 characters long." });
+    return;
+  }
+
+  if (role === "Student" && !fullName) {
+    res.status(400).json({ message: "Student name is required." });
+    return;
+  }
+
+  if (phoneNumber && !validatePhoneNumber(phoneNumber)) {
+    res.status(400).json({ message: "Please enter a valid phone number." });
     return;
   }
 
@@ -619,20 +733,40 @@ const registerUser = async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const fullName = getDisplayName(email);
+  let studentId = null;
+
+  if (role === "Student") {
+    studentId = await getNextId("Student", "Student_id");
+
+    await executeQuery(
+      `
+        INSERT INTO Student (Student_id, Name, Room_id, Guardian_Contact)
+        VALUES (@studentId, @name, NULL, @guardianContact)
+      `,
+      (request) =>
+        request
+          .input("studentId", sql.Int, studentId)
+          .input("name", sql.NVarChar(100), fullName)
+          .input("guardianContact", sql.NVarChar(20), guardianContact)
+    );
+  }
+
   const insertResult = await pool
     .request()
     .input("email", sql.NVarChar, email)
     .input("passwordHash", sql.NVarChar, passwordHash)
     .input("fullName", sql.NVarChar(120), fullName)
+    .input("phoneNumber", sql.NVarChar(30), phoneNumber)
+    .input("role", sql.NVarChar(20), role)
+    .input("studentId", sql.Int, studentId)
     .query(`
-      INSERT INTO Users (email, passwordHash, fullName)
-      OUTPUT INSERTED.id, INSERTED.email, INSERTED.fullName, INSERTED.phoneNumber
-      VALUES (@email, @passwordHash, @fullName);
+      INSERT INTO Users (email, passwordHash, fullName, phoneNumber, role, studentId)
+      OUTPUT INSERTED.id, INSERTED.email, INSERTED.fullName, INSERTED.phoneNumber, INSERTED.role, INSERTED.studentId
+      VALUES (@email, @passwordHash, @fullName, @phoneNumber, @role, @studentId);
     `);
 
   const createdUser = insertResult.recordset[0];
-  const { token, user } = buildAuthPayload(createdUser);
+  const { token, user } = await buildAuthPayload(createdUser);
 
   await pool
     .request()
@@ -654,6 +788,7 @@ const registerUser = async (req, res) => {
 const loginUser = async (req, res) => {
   const email = String(req.body.email || "").trim().toLowerCase();
   const password = String(req.body.password || "");
+  const requestedRole = normalizeString(req.body.role);
 
   if (!validateEmail(email) || !password) {
     res.status(400).json({ message: "Email and password are required." });
@@ -673,6 +808,11 @@ const loginUser = async (req, res) => {
     return;
   }
 
+  if (requestedRole && getUserRole({ role: requestedRole }) !== getUserRole(userRecord)) {
+    res.status(403).json({ message: `This account is registered as ${getUserRole(userRecord)}.` });
+    return;
+  }
+
   const passwordMatches = await bcrypt.compare(password, userRecord.passwordHash);
 
   if (!passwordMatches) {
@@ -680,7 +820,7 @@ const loginUser = async (req, res) => {
     return;
   }
 
-  const { token, user } = buildAuthPayload(userRecord);
+  const { token, user } = await buildAuthPayload(userRecord);
 
   await pool
     .request()
@@ -835,7 +975,7 @@ const authMe = async (req, res) => {
 
   const currentUser = await queryOne(
     `
-      SELECT id, email, fullName, phoneNumber, lastLogin
+      SELECT id, email, fullName, phoneNumber, lastLogin, role, studentId
       FROM Users
       WHERE id = @id
     `,
@@ -847,13 +987,18 @@ const authMe = async (req, res) => {
     return;
   }
 
+  const normalizedUser = await (async () => {
+    if (isStudentUser(currentUser)) {
+      return buildStudentUser(currentUser);
+    }
+
+    return buildAdminUser(currentUser);
+  })();
+
   res.json({
-    id: currentUser.id,
-    email: currentUser.email,
-    name: getUserName(currentUser),
-    phoneNumber: currentUser.phoneNumber || null,
-    role: "Admin",
+    ...normalizedUser,
     lastLogin: currentUser.lastLogin,
+    homePath: getUserHomePath(normalizedUser.role),
   });
 };
 
@@ -862,6 +1007,7 @@ const updateProfile = async (req, res) => {
 
   const fullName = normalizeString(req.body.name);
   const phoneNumber = normalizeNullableString(req.body.phoneNumber);
+  const guardianContact = normalizeNullableString(req.body.guardianContact);
 
   if (!fullName) {
     res.status(400).json({ message: "Name is required." });
@@ -887,23 +1033,44 @@ const updateProfile = async (req, res) => {
         .input("phoneNumber", sql.NVarChar(30), phoneNumber)
   );
 
+  if (isStudentUser(req.user) && req.user.studentId) {
+    await executeQuery(
+      `
+        UPDATE Student
+        SET Name = @name,
+            Guardian_Contact = @guardianContact
+        WHERE Student_id = @studentId
+      `,
+      (request) =>
+        request
+          .input("name", sql.NVarChar(100), fullName)
+          .input("guardianContact", sql.NVarChar(20), guardianContact)
+          .input("studentId", sql.Int, req.user.studentId)
+    );
+  }
+
   const updatedUser = await queryOne(
     `
-      SELECT id, email, fullName, phoneNumber, lastLogin
+      SELECT id, email, fullName, phoneNumber, lastLogin, role, studentId
       FROM Users
       WHERE id = @id
     `,
     (request) => request.input("id", sql.Int, req.user.id)
   );
 
+  const normalizedUser = await (async () => {
+    if (isStudentUser(updatedUser)) {
+      return buildStudentUser(updatedUser);
+    }
+
+    return buildAdminUser(updatedUser);
+  })();
+
   res.json({
-    id: updatedUser.id,
-    email: updatedUser.email,
-    name: getUserName(updatedUser),
-    phoneNumber: updatedUser.phoneNumber || null,
-    role: "Admin",
+    ...normalizedUser,
     lastLogin: updatedUser.lastLogin,
     message: "Profile updated successfully.",
+    homePath: getUserHomePath(normalizedUser.role),
   });
 };
 
@@ -912,6 +1079,7 @@ protectedRouter.use(authenticateToken);
 
 protectedRouter.get(
   "/dashboard/summary",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const summary = await queryOne(`
       SELECT
@@ -931,9 +1099,115 @@ protectedRouter.get(
 );
 
 protectedRouter.get(
+  "/student/dashboard",
+  requireStudent,
+  asyncHandler(async (req, res) => {
+    const student = await getStudentAccountForRequest(req);
+
+    if (!student) {
+      res.status(404).json({ message: "Student profile not found for this account." });
+      return;
+    }
+
+    const [availableRooms, totalPayments, pendingLeaves, latestPayment] = await Promise.all([
+      queryOne("SELECT COUNT(*) AS total FROM Room WHERE Current_Occupancy < Capacity"),
+      queryOne(
+        "SELECT COUNT(*) AS total FROM Payment WHERE Student_id = @studentId",
+        (request) => request.input("studentId", sql.Int, student.student_id)
+      ),
+      queryOne(
+        "SELECT COUNT(*) AS total FROM Leave_Request WHERE student_id = @studentId AND Status = 'Pending'",
+        (request) => request.input("studentId", sql.Int, student.student_id)
+      ),
+      queryOne(
+        `
+          SELECT TOP 1 Amount AS amount, Payment_Date AS payment_date, [Month] AS [month]
+          FROM Payment
+          WHERE Student_id = @studentId
+          ORDER BY Payment_Date DESC, Payment_id DESC
+        `,
+        (request) => request.input("studentId", sql.Int, student.student_id)
+      ),
+    ]);
+
+    res.json({
+      student,
+      roomAssigned: Boolean(student.room_id),
+      availableRooms: Number(availableRooms?.total || 0),
+      totalPayments: Number(totalPayments?.total || 0),
+      pendingLeaves: Number(pendingLeaves?.total || 0),
+      latestPayment: latestPayment || null,
+      lastUpdatedAt: new Date().toISOString(),
+    });
+  })
+);
+
+protectedRouter.post(
+  "/student/apply-seat",
+  requireStudent,
+  asyncHandler(async (req, res) => {
+    const requestedRoomId = parsePositiveInt(req.body.room_id);
+
+    if (!requestedRoomId) {
+      res.status(400).json({ message: "Please choose a valid room." });
+      return;
+    }
+
+    const student = await getStudentAccountForRequest(req);
+
+    if (!student) {
+      res.status(404).json({ message: "Student profile not found for this account." });
+      return;
+    }
+
+    if (student.room_id) {
+      res.status(400).json({ message: "A seat is already assigned to your account." });
+      return;
+    }
+
+    const roomAvailability = await getRoomAvailability(requestedRoomId);
+
+    if (!roomAvailability) {
+      res.status(400).json({ message: "The selected room does not exist." });
+      return;
+    }
+
+    if (Number(roomAvailability.current_occupancy || 0) >= Number(roomAvailability.capacity || 0)) {
+      res.status(400).json({ message: "The selected room is already full." });
+      return;
+    }
+
+    await executeQuery(
+      `
+        UPDATE Student
+        SET Room_id = @roomId
+        WHERE Student_id = @studentId
+      `,
+      (request) =>
+        request
+          .input("roomId", sql.Int, requestedRoomId)
+          .input("studentId", sql.Int, student.student_id)
+    );
+
+    await syncRoomOccupancy([requestedRoomId]);
+
+    const updatedStudent = await getStudentProfileById(student.student_id);
+    res.json({
+      message: "Seat application successful. Your room has been assigned.",
+      student: updatedStudent,
+    });
+  })
+);
+
+protectedRouter.get(
   "/students",
   asyncHandler(async (req, res) => {
-    const rows = await queryRows(`${studentSelectQuery} ORDER BY s.Student_id`);
+    const rows = isStudentUser(req.user)
+      ? await queryRows(
+          `${studentSelectQuery} WHERE s.Student_id = @studentId ORDER BY s.Student_id`,
+          (request) => request.input("studentId", sql.Int, req.user.studentId)
+        )
+      : await queryRows(`${studentSelectQuery} ORDER BY s.Student_id`);
 
     res.json(rows);
   })
@@ -941,6 +1215,7 @@ protectedRouter.get(
 
 protectedRouter.post(
   "/students",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const name = normalizeString(req.body.name);
     const roomId = parsePositiveInt(req.body.room_id);
@@ -992,6 +1267,7 @@ protectedRouter.post(
 
 protectedRouter.put(
   "/students/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const studentId = parsePositiveInt(req.params.id);
     const name = normalizeString(req.body.name);
@@ -1060,6 +1336,7 @@ protectedRouter.put(
 
 protectedRouter.delete(
   "/students/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const studentId = parsePositiveInt(req.params.id);
 
@@ -1080,6 +1357,7 @@ protectedRouter.delete(
 
     await executeQuery(
       `
+        DELETE FROM Users WHERE studentId = @studentId;
         DELETE FROM Visitor WHERE Student_id = @studentId;
         DELETE FROM Payment WHERE Student_id = @studentId;
         DELETE FROM Leave_Request WHERE student_id = @studentId;
@@ -1105,6 +1383,7 @@ protectedRouter.get(
 
 protectedRouter.post(
   "/rooms",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const roomNumber = normalizeString(req.body.room_number);
     const capacity = parsePositiveInt(req.body.capacity);
@@ -1166,6 +1445,7 @@ protectedRouter.post(
 
 protectedRouter.put(
   "/rooms/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const roomId = parsePositiveInt(req.params.id);
     const roomNumber = normalizeString(req.body.room_number);
@@ -1256,6 +1536,7 @@ protectedRouter.put(
 
 protectedRouter.delete(
   "/rooms/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const roomId = parsePositiveInt(req.params.id);
 
@@ -1306,6 +1587,7 @@ protectedRouter.get(
 
 protectedRouter.post(
   "/blocks",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const blockName = normalizeString(req.body.block_name);
     const totalRooms = parseNonNegativeInt(req.body.total_rooms);
@@ -1341,6 +1623,7 @@ protectedRouter.post(
 
 protectedRouter.put(
   "/blocks/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const blockId = parsePositiveInt(req.params.id);
     const blockName = normalizeString(req.body.block_name);
@@ -1392,6 +1675,7 @@ protectedRouter.put(
 
 protectedRouter.delete(
   "/blocks/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const blockId = parsePositiveInt(req.params.id);
 
@@ -1432,6 +1716,7 @@ protectedRouter.delete(
 
 protectedRouter.get(
   "/visitors",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const rows = await queryRows(`${visitorSelectQuery} ORDER BY v.Date_time_Entry DESC`);
 
@@ -1441,6 +1726,7 @@ protectedRouter.get(
 
 protectedRouter.post(
   "/visitors",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const studentId = parsePositiveInt(req.body.student_id);
     const purpose = normalizeString(req.body.purpose);
@@ -1500,6 +1786,7 @@ protectedRouter.post(
 
 protectedRouter.put(
   "/visitors/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const visitorId = parsePositiveInt(req.params.id);
     const studentId = parsePositiveInt(req.body.student_id);
@@ -1577,6 +1864,7 @@ protectedRouter.put(
 
 protectedRouter.delete(
   "/visitors/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const visitorId = parsePositiveInt(req.params.id);
 
@@ -1607,7 +1895,12 @@ protectedRouter.delete(
 protectedRouter.get(
   "/payments",
   asyncHandler(async (req, res) => {
-    const rows = await queryRows(`${paymentSelectQuery} ORDER BY p.Payment_Date DESC, p.Payment_id DESC`);
+    const rows = isStudentUser(req.user)
+      ? await queryRows(
+          `${paymentSelectQuery} WHERE p.Student_id = @studentId ORDER BY p.Payment_Date DESC, p.Payment_id DESC`,
+          (request) => request.input("studentId", sql.Int, req.user.studentId)
+        )
+      : await queryRows(`${paymentSelectQuery} ORDER BY p.Payment_Date DESC, p.Payment_id DESC`);
 
     res.json(rows);
   })
@@ -1615,6 +1908,7 @@ protectedRouter.get(
 
 protectedRouter.post(
   "/payments",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const studentId = parsePositiveInt(req.body.student_id);
     const amount = parsePositiveInt(req.body.amount);
@@ -1674,6 +1968,7 @@ protectedRouter.post(
 
 protectedRouter.put(
   "/payments/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const paymentId = parsePositiveInt(req.params.id);
     const studentId = parsePositiveInt(req.body.student_id);
@@ -1751,6 +2046,7 @@ protectedRouter.put(
 
 protectedRouter.delete(
   "/payments/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const paymentId = parsePositiveInt(req.params.id);
 
@@ -1789,6 +2085,7 @@ protectedRouter.get(
 
 protectedRouter.post(
   "/fees",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const type = normalizeString(req.body.type);
     const amount = parsePositiveInt(req.body.amount);
@@ -1824,6 +2121,7 @@ protectedRouter.post(
 
 protectedRouter.put(
   "/fees/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const feeId = parsePositiveInt(req.params.id);
     const type = normalizeString(req.body.type);
@@ -1875,6 +2173,7 @@ protectedRouter.put(
 
 protectedRouter.delete(
   "/fees/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const feeId = parsePositiveInt(req.params.id);
 
@@ -1913,6 +2212,7 @@ protectedRouter.get(
 
 protectedRouter.post(
   "/mess",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const day = normalizeString(req.body.day);
     const breakfast = normalizeNullableString(req.body.breakfast);
@@ -1945,6 +2245,7 @@ protectedRouter.post(
 
 protectedRouter.put(
   "/mess/:dayId",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const currentDay = normalizeString(req.params.dayId);
     const nextDay = normalizeString(req.body.day || req.params.dayId);
@@ -1997,6 +2298,7 @@ protectedRouter.put(
 
 protectedRouter.delete(
   "/mess/:dayId",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const day = normalizeString(req.params.dayId);
 
@@ -2032,6 +2334,7 @@ protectedRouter.get(
 
 protectedRouter.post(
   "/maintenance",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const roomId = parsePositiveInt(req.body.room_id);
     const issueType = normalizeString(req.body.issue_type);
@@ -2091,6 +2394,7 @@ protectedRouter.post(
 
 protectedRouter.put(
   "/maintenance/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const requestId = parsePositiveInt(req.params.id);
     const roomId = parsePositiveInt(req.body.room_id);
@@ -2168,6 +2472,7 @@ protectedRouter.put(
 
 protectedRouter.delete(
   "/maintenance/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const requestId = parsePositiveInt(req.params.id);
 
@@ -2198,7 +2503,12 @@ protectedRouter.delete(
 protectedRouter.get(
   "/leaves",
   asyncHandler(async (req, res) => {
-    const rows = await queryRows(`${leaveSelectQuery} ORDER BY l.from_date DESC, l.leave_id DESC`);
+    const rows = isStudentUser(req.user)
+      ? await queryRows(
+          `${leaveSelectQuery} WHERE l.student_id = @studentId ORDER BY l.from_date DESC, l.leave_id DESC`,
+          (request) => request.input("studentId", sql.Int, req.user.studentId)
+        )
+      : await queryRows(`${leaveSelectQuery} ORDER BY l.from_date DESC, l.leave_id DESC`);
 
     res.json(rows);
   })
@@ -2206,6 +2516,7 @@ protectedRouter.get(
 
 protectedRouter.post(
   "/leaves",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const studentId = parsePositiveInt(req.body.student_id);
     const fromDate = parseDateValue(req.body.from_date);
@@ -2277,6 +2588,7 @@ protectedRouter.post(
 
 protectedRouter.put(
   "/leaves/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const leaveId = parsePositiveInt(req.params.id);
     const studentId = parsePositiveInt(req.body.student_id);
@@ -2367,6 +2679,7 @@ protectedRouter.put(
 
 protectedRouter.delete(
   "/leaves/:id",
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const leaveId = parsePositiveInt(req.params.id);
 
@@ -2429,6 +2742,10 @@ app.post("/reset-password", asyncHandler(resetPassword));
 
 app.post("/api/auth/register", asyncHandler(registerUser));
 app.post("/api/auth/login", asyncHandler(loginUser));
+app.post("/api/auth/admin/register", asyncHandler(withForcedRole("Admin", registerUser)));
+app.post("/api/auth/admin/login", asyncHandler(withForcedRole("Admin", loginUser)));
+app.post("/api/auth/student/register", asyncHandler(withForcedRole("Student", registerUser)));
+app.post("/api/auth/student/login", asyncHandler(withForcedRole("Student", loginUser)));
 app.post("/api/auth/forgot-password", asyncHandler(forgotPassword));
 app.post("/api/auth/reset-password", asyncHandler(resetPassword));
 app.get("/api/auth/me", authenticateToken, asyncHandler(authMe));

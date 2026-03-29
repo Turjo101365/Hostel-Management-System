@@ -24,10 +24,17 @@ const variantClasses = {
     accent: 'text-cyan-600 dark:text-cyan-300',
     muted: 'text-slate-500 dark:text-slate-400',
   },
+  student: {
+    wrapper: 'border-slate-200 bg-white/85 text-slate-700 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/75 dark:text-slate-300',
+    chip: 'border-slate-200 bg-slate-50 text-slate-700 hover:border-cyan-400/40 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:text-white',
+    divider: 'border-slate-200 dark:border-slate-800',
+    accent: 'text-cyan-600 dark:text-cyan-300',
+    muted: 'text-slate-500 dark:text-slate-400',
+  },
 }
 
 const Footer = ({ variant = 'public' }) => {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, homePath } = useAuth()
   const styles = variantClasses[variant] || variantClasses.public
   const year = new Date().getFullYear()
 
@@ -38,13 +45,20 @@ const Footer = ({ variant = 'public' }) => {
         { label: 'Rooms', to: '/admin/rooms' },
         { label: 'Profile', to: '/admin/profile' },
       ]
+    : variant === 'student'
+      ? [
+          { label: 'Dashboard', to: '/student' },
+          { label: 'Rooms', to: '/student/rooms' },
+          { label: 'Payments', to: '/student/payments' },
+          { label: 'Profile', to: '/student/profile' },
+        ]
     : [
         { label: 'Home', to: '/' },
         { label: 'About', to: '/about' },
         { label: 'Rooms', to: '/rooms' },
         { label: 'Contact', to: '/contact' },
         isAuthenticated
-          ? { label: 'Dashboard', to: '/admin' }
+          ? { label: 'Dashboard', to: homePath }
           : { label: 'Login', to: '/login' },
       ]
 
@@ -65,6 +79,8 @@ const Footer = ({ variant = 'public' }) => {
             <p className={`mt-4 text-sm leading-7 ${styles.muted}`}>
               {variant === 'admin'
                 ? 'Admin workspace for managing students, rooms, payments, visitors, and hostel operations.'
+                : variant === 'student'
+                  ? 'Student workspace for checking hostel information, reviewing your records, and applying for an available seat.'
                 : 'A connected hostel platform with public information, authentication, and MSSQL-backed admin workflows.'}
             </p>
           </div>

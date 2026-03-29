@@ -11,7 +11,9 @@ const Navbar = ({ onMenuClick, title }) => {
   const { darkMode, toggleDarkMode } = useTheme()
   const navigate = useNavigate()
 
-  const displayName = user?.name || 'Administrator'
+  const displayName = user?.name || (user?.role === 'Student' ? 'Student' : 'Administrator')
+  const homePath = user?.role === 'Student' ? '/student' : '/admin'
+  const profilePath = `${homePath}/profile`
 
   const handleLogout = () => {
     logout()
@@ -21,7 +23,7 @@ const Navbar = ({ onMenuClick, title }) => {
 
   const handleProfileSettings = () => {
     setShowUserMenu(false)
-    navigate('/admin/profile')
+    navigate(profilePath)
   }
 
   return (

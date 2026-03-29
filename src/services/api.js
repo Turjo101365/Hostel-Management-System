@@ -10,6 +10,11 @@ export const clearStoredSession = () => {
   localStorage.removeItem(STORAGE_KEYS.user)
 }
 
+export const isAuthPath = (pathname = '') =>
+  ['/login', '/register', '/forgot-password', '/reset-password'].some((prefix) =>
+    pathname.startsWith(prefix)
+  )
+
 export const getApiOrigin = () => {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
   return baseUrl.replace(/\/api\/?$/, '')
@@ -55,7 +60,7 @@ api.interceptors.response.use(
       (error.response?.status === 401 || error.response?.status === 403) &&
       hasStoredSession &&
       typeof window !== 'undefined' &&
-      !window.location.pathname.startsWith('/login')
+      !isAuthPath(window.location.pathname)
 
     if (shouldRedirect) {
       clearStoredSession()

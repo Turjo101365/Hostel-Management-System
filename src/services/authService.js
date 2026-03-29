@@ -10,15 +10,35 @@ const persistSession = (payload) => {
   }
 }
 
+const postAuthWithFallback = async (preferredEndpoint, fallbackEndpoint, payload) => {
+  try {
+    return await api.post(preferredEndpoint, payload)
+  } catch (error) {
+    const message = error?.response?.data?.message || ''
+    const status = error?.response?.status
+    const shouldFallback =
+      status === 404 ||
+      (status === 401 && message === 'Authentication token is required.')
+
+    if (!shouldFallback) {
+      throw error
+    }
+
+    return api.post(fallbackEndpoint, payload)
+  }
+}
+
 export const authService = {
-  login: async (email, password) => {
-    const response = await api.post('/auth/login', { email, password })
+  login: async ({ email, password, role }) => {
+    const endpoint = role === 'Student' ? '/auth/student/login' : '/auth/admin/login'
+    const response = await postAuthWithFallback(endpoint, '/auth/login', { email, password, role })
     persistSession(response.data)
     return response.data
   },
 
   register: async (userData) => {
-    const response = await api.post('/auth/register', userData)
+    const endpoint = userData.role === 'Student' ? '/auth/student/register' : '/auth/admin/register'
+    const response = await postAuthWithFallback(endpoint, '/auth/register', userData)
     persistSession(response.data)
     return response.data
   },

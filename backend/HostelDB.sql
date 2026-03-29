@@ -32,6 +32,8 @@ CREATE TABLE Users (
     email NVARCHAR(100) UNIQUE NOT NULL,
     fullName NVARCHAR(120) NULL,
     phoneNumber NVARCHAR(30) NULL,
+    role NVARCHAR(20) NOT NULL DEFAULT 'Admin',
+    studentId INT NULL,
     passwordHash NVARCHAR(255) NOT NULL,
     jwtToken NVARCHAR(500) NULL,
     passwordResetCodeHash NVARCHAR(255) NULL,

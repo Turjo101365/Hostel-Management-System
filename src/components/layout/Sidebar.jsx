@@ -13,8 +13,9 @@ import {
   X,
   Home
 } from 'lucide-react'
+import { useAuth } from '../../auth/AuthContext'
 
-const navItems = [
+const adminNavItems = [
   { path: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { path: '/admin/students', label: 'Students', icon: Users },
   { path: '/admin/rooms', label: 'Rooms', icon: DoorOpen },
@@ -27,7 +28,20 @@ const navItems = [
   { path: '/admin/leaves', label: 'Leave Requests', icon: CalendarDays },
 ]
 
+const studentNavItems = [
+  { path: '/student', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { path: '/student/rooms', label: 'Rooms', icon: DoorOpen },
+  { path: '/student/blocks', label: 'Blocks', icon: Building2 },
+  { path: '/student/payments', label: 'Payments', icon: CreditCard },
+  { path: '/student/fees', label: 'Fees', icon: Receipt },
+  { path: '/student/mess', label: 'Mess Menu', icon: Utensils },
+  { path: '/student/leaves', label: 'Leave History', icon: CalendarDays },
+]
+
 const Sidebar = ({ isOpen, setIsOpen }) => {
+  const { user } = useAuth()
+  const navItems = user?.role === 'Student' ? studentNavItems : adminNavItems
+
   return (
     <>
       {/* Mobile overlay */}

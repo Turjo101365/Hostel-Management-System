@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, KeyRound, Lock, Mail, ShieldCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
-import api from '../services/api'
+import api, { clearStoredSession } from '../services/api'
 import Input from '../components/common/Input'
 import Button from '../components/common/Button'
 import Card from '../components/common/Card'
@@ -26,6 +26,10 @@ const ResetPassword = () => {
   const emailSent = location.state?.emailSent
   const previewResetCode = location.state?.previewResetCode
   const expiresAt = location.state?.expiresAt
+
+  useEffect(() => {
+    clearStoredSession()
+  }, [])
 
   useEffect(() => {
     const email = searchParams.get('email') || location.state?.email || ''
