@@ -67,7 +67,7 @@ const About = () => {
               </h2>
 
               <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600 dark:text-slate-300">
-                HostelMS is designed to help administrators manage students, rooms, visitors, payments,
+                HostelMS is designed to help administrators manage students, rooms, bookings, payments,
                 maintenance, and leave requests with live MSSQL-backed updates. The goal is simple:
                 reduce manual work and make every core hostel workflow easier to track.
               </p>
@@ -179,7 +179,7 @@ const About = () => {
               <h3 className="mt-6 text-2xl font-bold text-slate-900 dark:text-white">What the system covers</h3>
               <p className="mt-4 text-base leading-8 text-slate-600 dark:text-slate-300">
                 The admin dashboard connects student records, room assignments, hostel blocks, mess menu,
-                fees, maintenance, and visitor tracking into one workflow. Changes made from the frontend
+                fees, maintenance, and booking approvals into one workflow. Changes made from the frontend
                 are designed to stay synced with the actual database.
               </p>
             </div>

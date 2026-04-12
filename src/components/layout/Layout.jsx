@@ -11,7 +11,6 @@ const pageTitles = {
   '/admin/students': 'Student Directory',
   '/admin/rooms': 'Room Directory',
   '/admin/blocks': 'Hostel Blocks',
-  '/admin/visitors': 'Visitor Log',
   '/admin/bookings': 'Booking Transactions',
   '/admin/payments': 'Payment Ledger',
   '/admin/fees': 'Fee Structure',

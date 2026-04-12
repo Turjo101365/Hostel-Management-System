@@ -28,13 +28,6 @@ export const mockBlocks = [
   { id: 3, block_id: 'B003', block_name: 'Block C', total_rooms: 15 },
 ]
 
-export const mockVisitors = [
-  { id: 1, visitor_id: 'V001', student_id: 'STU001', visitor_name: 'Mark Smith', entry_time: '2024-01-15 10:30', exit_time: '2024-01-15 14:30', purpose: 'Family Visit' },
-  { id: 2, visitor_id: 'V002', student_id: 'STU002', visitor_name: 'Anna Johnson', entry_time: '2024-01-15 09:00', exit_time: '2024-01-15 17:00', purpose: 'Guardian Visit' },
-  { id: 3, visitor_id: 'V003', student_id: 'STU003', visitor_name: 'Tom Brown', entry_time: '2024-01-14 11:00', exit_time: '2024-01-14 13:00', purpose: 'Personal' },
-  { id: 4, visitor_id: 'V004', student_id: 'STU004', visitor_name: 'Rachel Davis', entry_time: '2024-01-16 15:00', exit_time: null, purpose: 'Family Visit' },
-]
-
 export const mockPayments = [
   { id: 1, payment_id: 'PAY001', student_id: 'STU001', student_name: 'John Smith', amount: 500, payment_date: '2024-01-01', month: 'January 2024', status: 'Paid' },
   { id: 2, payment_id: 'PAY002', student_id: 'STU002', student_name: 'Sarah Johnson', amount: 500, payment_date: '2024-01-02', month: 'January 2024', status: 'Paid' },

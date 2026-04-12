@@ -26,6 +26,7 @@ export const dashboardService = {
 
 export const bookingRequestsService = {
   getAll: (params) => fetchResource(params?.status ? `/booking-requests?status=${encodeURIComponent(params.status)}` : '/booking-requests'),
+  updateStatus: (id, payload) => updateResource('/booking-requests', id, payload),
 }
 
 export const adminInviteService = {
@@ -68,13 +69,6 @@ export const blocksService = {
   create: (payload) => createResource('/blocks', payload),
   update: (id, payload) => updateResource('/blocks', id, payload),
   remove: (id) => deleteResource('/blocks', id),
-}
-
-export const visitorsService = {
-  getAll: () => fetchResource('/visitors'),
-  create: (payload) => createResource('/visitors', payload),
-  update: (id, payload) => updateResource('/visitors', id, payload),
-  remove: (id) => deleteResource('/visitors', id),
 }
 
 export const paymentsService = {

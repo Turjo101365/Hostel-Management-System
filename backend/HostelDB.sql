@@ -14,11 +14,11 @@ GO
 
 -- ------------------ RESET EXISTING TABLES ------------------
 -- Drop child tables first, then parent tables.
+IF OBJECT_ID('dbo.Student_Roommate_Profile', 'U') IS NOT NULL DROP TABLE dbo.Student_Roommate_Profile;
+IF OBJECT_ID('dbo.Student_Room_Booking', 'U') IS NOT NULL DROP TABLE dbo.Student_Room_Booking;
 IF OBJECT_ID('dbo.Payment', 'U') IS NOT NULL DROP TABLE dbo.Payment;
-IF OBJECT_ID('dbo.Visitor', 'U') IS NOT NULL DROP TABLE dbo.Visitor;
 IF OBJECT_ID('dbo.Students', 'U') IS NOT NULL DROP TABLE dbo.Students;
 IF OBJECT_ID('dbo.Student', 'U') IS NOT NULL DROP TABLE dbo.Student;
-IF OBJECT_ID('dbo.Room_Booking_Request', 'U') IS NOT NULL DROP TABLE dbo.Room_Booking_Request;
 IF OBJECT_ID('dbo.Public_Room_Showcase', 'U') IS NOT NULL DROP TABLE dbo.Public_Room_Showcase;
 IF OBJECT_ID('dbo.Room', 'U') IS NOT NULL DROP TABLE dbo.Room;
 IF OBJECT_ID('dbo.Hostel_Block', 'U') IS NOT NULL DROP TABLE dbo.Hostel_Block;
@@ -91,20 +91,6 @@ CREATE TABLE dbo.Public_Room_Showcase (
 );
 GO
 
--- ------------------ ROOM BOOKING REQUEST ------------------
-CREATE TABLE dbo.Room_Booking_Request (
-    Booking_id INT IDENTITY(1,1) NOT NULL,
-    Showcase_Room_id INT NOT NULL,
-    User_id INT NOT NULL,
-    Requested_At DATETIME NOT NULL CONSTRAINT DF_Room_Booking_Request_Requested_At DEFAULT GETDATE(),
-    Status NVARCHAR(20) NOT NULL CONSTRAINT DF_Room_Booking_Request_Status DEFAULT 'Pending',
-    CONSTRAINT PK_Room_Booking_Request PRIMARY KEY (Booking_id),
-    CONSTRAINT CK_Room_Booking_Request_Status CHECK (Status IN ('Pending', 'Approved', 'Rejected')),
-    CONSTRAINT FK_Room_Booking_Request_Showcase FOREIGN KEY (Showcase_Room_id) REFERENCES dbo.Public_Room_Showcase(Showcase_Room_id),
-    CONSTRAINT FK_Room_Booking_Request_User FOREIGN KEY (User_id) REFERENCES dbo.Users(id)
-);
-GO
-
 -- ------------------ HOSTEL BLOCK ------------------
 CREATE TABLE dbo.Hostel_Block (
     Block_id INT NOT NULL,
@@ -153,19 +139,6 @@ GO
 CREATE UNIQUE INDEX UQ_Students_Email ON dbo.Students (Email) WHERE Email IS NOT NULL;
 GO
 
--- ------------------ VISITOR ------------------
-CREATE TABLE dbo.Visitor (
-    Visitor_id INT NOT NULL,
-    Student_id INT NOT NULL,
-    Date_time_Entry DATETIME NOT NULL,
-    Date_time_Exit DATETIME NULL,
-    Purpose NVARCHAR(255) NOT NULL,
-    CONSTRAINT PK_Visitor PRIMARY KEY (Visitor_id),
-    CONSTRAINT CK_Visitor_Time CHECK (Date_time_Exit IS NULL OR Date_time_Exit >= Date_time_Entry),
-    CONSTRAINT FK_Visitor_Student FOREIGN KEY (Student_id) REFERENCES dbo.Students(Student_id)
-);
-GO
-
 -- ------------------ PAYMENT ------------------
 CREATE TABLE dbo.Payment (
     Payment_id INT NOT NULL,
@@ -176,6 +149,26 @@ CREATE TABLE dbo.Payment (
     CONSTRAINT PK_Payment PRIMARY KEY (Payment_id),
     CONSTRAINT CK_Payment_Amount CHECK (Amount > 0),
     CONSTRAINT FK_Payment_Student FOREIGN KEY (Student_id) REFERENCES dbo.Students(Student_id)
+);
+GO
+
+-- ------------------ STUDENT ROOM BOOKING ------------------
+CREATE TABLE dbo.Student_Room_Booking (
+    Booking_Transaction_id INT IDENTITY(1,1) NOT NULL,
+    Student_id INT NOT NULL,
+    Showcase_Room_id INT NOT NULL,
+    Allocated_Room_id INT NULL,
+    Payment_id INT NULL,
+    Amount INT NOT NULL,
+    Card_Brand NVARCHAR(30) NULL,
+    Card_Last4 NVARCHAR(4) NULL,
+    Status NVARCHAR(20) NOT NULL CONSTRAINT DF_Student_Room_Booking_Status DEFAULT 'Pending',
+    Booked_At DATETIME NOT NULL CONSTRAINT DF_Student_Room_Booking_Booked_At DEFAULT GETDATE(),
+    CONSTRAINT PK_Student_Room_Booking PRIMARY KEY (Booking_Transaction_id),
+    CONSTRAINT CK_Student_Room_Booking_Status CHECK (Status IN ('Pending', 'Approved', 'Rejected')),
+    CONSTRAINT FK_Student_Room_Booking_Student FOREIGN KEY (Student_id) REFERENCES dbo.Students(Student_id),
+    CONSTRAINT FK_Student_Room_Booking_Showcase FOREIGN KEY (Showcase_Room_id) REFERENCES dbo.Public_Room_Showcase(Showcase_Room_id),
+    CONSTRAINT FK_Student_Room_Booking_AllocatedRoom FOREIGN KEY (Allocated_Room_id) REFERENCES dbo.Room(Room_id)
 );
 GO
 
@@ -195,8 +188,7 @@ GO
 -- ------------------ SUPPORTING INDEXES ------------------
 CREATE INDEX IX_Room_Hostel_Block ON dbo.Room (Hostel_Block);
 CREATE INDEX IX_Students_Room_id ON dbo.Students (Room_id);
-CREATE INDEX IX_Visitor_Student_id ON dbo.Visitor (Student_id);
 CREATE INDEX IX_Payment_Student_id ON dbo.Payment (Student_id);
 CREATE INDEX IX_Public_Room_Showcase_Category_Sort ON dbo.Public_Room_Showcase (Category, Sort_Order);
-CREATE INDEX IX_Room_Booking_Request_User_Status ON dbo.Room_Booking_Request (User_id, Status);
+CREATE INDEX IX_Student_Room_Booking_Student ON dbo.Student_Room_Booking (Student_id, Booked_At DESC);
 GO

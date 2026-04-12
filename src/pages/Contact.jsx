@@ -12,7 +12,7 @@ const contacts = [
   },
   {
     name: 'Resident Support',
-    description: 'For maintenance, visitor approvals, and resident support issues.',
+    description: 'For maintenance, booking approvals, and resident support issues.',
     email: 'support@hostelms.local',
     phone: '+880 1700-000002',
   },

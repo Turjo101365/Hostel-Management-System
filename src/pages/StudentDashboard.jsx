@@ -254,7 +254,7 @@ const StudentDashboard = () => {
       <Card title="Recent Bookings" subtitle="Your room booking activity and allocations">
         {bookings.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-200 p-6 text-center dark:border-slate-700">
-            <p className="text-sm text-gray-500 dark:text-gray-400">No bookings found yet. Book a room from the rooms page and complete payment to see it here.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">No room booking requests found yet. Submit a room payment request to see it here.</p>
             <Link
               to="/rooms"
               className="mt-4 inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
@@ -273,7 +273,7 @@ const StudentDashboard = () => {
                       Allocated Room {booking.allocated_room_number || 'Pending'} • {booking.allocated_block_name || 'Block pending'}
                     </p>
                   </div>
-                  <Badge variant={booking.status === 'Completed' ? 'success' : booking.status === 'Pending' ? 'warning' : 'danger'}>
+                  <Badge variant={getBookingBadgeVariant(booking.status)}>
                     {booking.status}
                   </Badge>
                 </div>

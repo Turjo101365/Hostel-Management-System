@@ -160,7 +160,7 @@ const Students = () => (
     editTitle="Edit Student"
     searchPlaceholder="Search students by ID, name, email, phone, room, block, or payment..."
     emptyMessage="No students were found in the database."
-    getDeleteMessage={(row) => `Delete ${row.name}? Related visitor, payment, leave, and roommate records for this student will also be removed.`}
+    getDeleteMessage={(row) => `Delete ${row.name}? Related booking, payment, leave, and roommate records for this student will also be removed.`}
   />
 )
 

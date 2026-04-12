@@ -41,7 +41,7 @@ const metricCards = [
   {
     label: 'Core Admin Modules',
     value: '9+',
-    note: 'Students, rooms, visitors, fees, maintenance, and more.',
+    note: 'Students, rooms, bookings, fees, maintenance, and more.',
     icon: ClipboardCheck,
   },
   {
@@ -69,7 +69,7 @@ const workflowCards = [
   },
   {
     title: 'Daily Operations',
-    description: 'Keep payments, visitors, maintenance, and leave requests organized inside one system.',
+    description: 'Keep payments, bookings, maintenance, and leave requests organized inside one system.',
   },
 ]
 
@@ -221,7 +221,7 @@ const Home = () => {
               <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600 dark:text-slate-300">
                 Review accommodation details, essential information, and support channels before moving
                 into a secure sign-in or account creation flow. Once authenticated, administrators can
-                manage student records, room allocation, visitors, payments, and daily hostel operations
+                manage student records, room allocation, bookings, payments, and daily hostel operations
                 from one centralized dashboard.
               </p>
 
@@ -283,7 +283,7 @@ const Home = () => {
                   </div>
                   <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 dark:border-white/10 dark:bg-slate-950/70">
                     <p className="text-sm font-semibold text-slate-900 dark:text-white">3. Centralized Operations</p>
-                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">The dashboard brings together students, rooms, visitors, payments, maintenance, and related processes within one operational workspace.</p>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">The dashboard brings together students, rooms, bookings, payments, maintenance, and related processes within one operational workspace.</p>
                   </div>
                 </div>
               </div>

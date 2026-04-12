@@ -192,7 +192,7 @@ const StudentRoomPayment = () => {
     }, 1000)
 
     timeoutRef.current = window.setTimeout(() => {
-      navigate('/', { replace: true })
+      navigate('/student', { replace: true })
     }, 4000)
   }
 
@@ -226,7 +226,7 @@ const StudentRoomPayment = () => {
       clearBookingIntent()
       setSuccessPayload(response)
       setShowSuccessModal(true)
-      toast.success(response.message || 'Payment completed and room allocated.')
+      toast.success(response.message || 'Payment recorded. Your booking request is pending admin approval.')
       startRedirectCountdown()
     } catch (error) {
       const message = getApiErrorMessage(error, 'Unable to process payment right now.')
@@ -244,7 +244,7 @@ const StudentRoomPayment = () => {
             <p className="text-sm uppercase tracking-[0.2em] text-white/70">Student Checkout</p>
             <h1 className="mt-3 text-3xl font-bold lg:text-4xl">Secure Room Booking Payment</h1>
             <p className="mt-3 text-sm text-white/85 lg:text-base">
-              Complete your payment to confirm booking and auto-allocate your room instantly.
+              Complete your payment to submit a room booking request for admin approval.
             </p>
           </div>
 
@@ -259,7 +259,7 @@ const StudentRoomPayment = () => {
       </section>
 
       <div className="grid gap-6 lg:grid-cols-[1.05fr,0.95fr]">
-        <Card title="Selected Room" subtitle="This room card will be confirmed after successful payment" className="border-0 shadow-md">
+        <Card title="Selected Room" subtitle="This room request will stay pending until an admin approves it" className="border-0 shadow-md">
           {loadingRoom ? (
             <div className="space-y-4">
               <div className="h-52 rounded-2xl bg-gray-200 dark:bg-slate-700" />
@@ -297,14 +297,14 @@ const StudentRoomPayment = () => {
                   {formatCurrency(payableAmount)}
                 </p>
                 <p className="mt-1 text-xs text-cyan-700/80 dark:text-cyan-300/80">
-                  Base amount for first booking payment
+                  First payment is recorded immediately and reviewed with your booking request.
                 </p>
               </div>
             </div>
           ) : null}
         </Card>
 
-        <Card title="Card Payment" subtitle="Use your card credentials to complete booking" className="border-0 shadow-md">
+        <Card title="Card Payment" subtitle="Use your card credentials to submit this booking request" className="border-0 shadow-md">
           <form className="space-y-4" onSubmit={handlePayNow}>
             <Input
               label="Cardholder Name"
@@ -374,7 +374,7 @@ const StudentRoomPayment = () => {
               className="w-full"
             >
               <Sparkles className="mr-2 h-4 w-4" />
-              Pay {formatCurrency(payableAmount)} & Confirm Booking
+              Pay {formatCurrency(payableAmount)} & Submit Request
             </Button>
           </form>
         </Card>
@@ -389,16 +389,16 @@ const StudentRoomPayment = () => {
               </div>
               <div>
                 <p className="text-xs uppercase tracking-[0.25em] text-emerald-600 dark:text-emerald-300">Booking Complete</p>
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">DONE BOOKING</h3>
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Request Submitted</h3>
               </div>
             </div>
 
             <div className="mt-6 rounded-2xl border border-gray-200 p-4 dark:border-slate-700">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Allocated Room</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Requested Room</p>
               <p className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
-                Room {successPayload.room?.allocated?.room_number || '-'}{' '}
+                {successPayload.room?.requested?.title || 'Selected room'}{' '}
                 <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                  ({successPayload.room?.allocated?.block_name || 'Block pending'})
+                  ({successPayload.bookingStatus || 'Pending'})
                 </span>
               </p>
               <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
@@ -407,22 +407,22 @@ const StudentRoomPayment = () => {
             </div>
 
             <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">
-              Redirecting to homepage in {redirectCountdown} second{redirectCountdown === 1 ? '' : 's'}.
+              Redirecting to your dashboard in {redirectCountdown} second{redirectCountdown === 1 ? '' : 's'}.
             </p>
 
             <div className="mt-6 flex flex-wrap gap-3">
               <Button
                 type="button"
-                onClick={() => navigate('/', { replace: true })}
+                onClick={() => navigate('/student', { replace: true })}
               >
-                Go to Homepage
+                Open Dashboard
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => navigate('/student', { replace: true })}
+                onClick={() => navigate('/rooms', { replace: true })}
               >
-                Open Dashboard
+                Browse Rooms
               </Button>
             </div>
           </div>

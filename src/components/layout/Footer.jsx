@@ -81,7 +81,7 @@ const Footer = ({ variant = 'public' }) => {
             </div>
             <p className={`mt-4 text-sm leading-7 ${styles.muted}`}>
               {variant === 'admin'
-                ? 'Admin workspace for managing students, rooms, payments, visitors, and hostel operations.'
+                ? 'Admin workspace for managing students, rooms, payments, bookings, and hostel operations.'
                 : variant === 'student'
                   ? 'Student workspace for checking your hostel account, room assignment, payments, and leave activity.'
                 : 'A connected hostel platform with public information, authentication, and MSSQL-backed admin workflows.'}

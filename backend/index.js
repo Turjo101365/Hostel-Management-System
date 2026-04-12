@@ -353,6 +353,16 @@ const ensurePublicRoomShowcaseTable = async () => {
   const pool = await getPool();
 
   await pool.request().query(`
+    IF OBJECT_ID('dbo.Visitor', 'U') IS NOT NULL
+    BEGIN
+      DROP TABLE dbo.Visitor;
+    END;
+
+    IF OBJECT_ID('dbo.Room_Booking_Request', 'U') IS NOT NULL
+    BEGIN
+      DROP TABLE dbo.Room_Booking_Request;
+    END;
+
     IF OBJECT_ID('dbo.Public_Room_Showcase', 'U') IS NULL
     BEGIN
       CREATE TABLE dbo.Public_Room_Showcase (
@@ -377,38 +387,18 @@ const ensurePublicRoomShowcaseTable = async () => {
       ON dbo.Public_Room_Showcase (Category, Sort_Order);
     END;
 
-    IF OBJECT_ID('dbo.Room_Booking_Request', 'U') IS NULL
-    BEGIN
-      CREATE TABLE dbo.Room_Booking_Request (
-        Booking_id INT IDENTITY(1,1) NOT NULL,
-        Showcase_Room_id INT NOT NULL,
-        User_id INT NOT NULL,
-        Requested_At DATETIME NOT NULL CONSTRAINT DF_Room_Booking_Request_Requested_At DEFAULT GETDATE(),
-        Status NVARCHAR(20) NOT NULL CONSTRAINT DF_Room_Booking_Request_Status DEFAULT 'Pending',
-        CONSTRAINT PK_Room_Booking_Request PRIMARY KEY (Booking_id),
-        CONSTRAINT FK_Room_Booking_Request_Showcase FOREIGN KEY (Showcase_Room_id)
-          REFERENCES dbo.Public_Room_Showcase(Showcase_Room_id),
-        CONSTRAINT FK_Room_Booking_Request_User FOREIGN KEY (User_id)
-          REFERENCES dbo.Users(id),
-        CONSTRAINT CK_Room_Booking_Request_Status CHECK (Status IN ('Pending', 'Approved', 'Rejected'))
-      );
-
-      CREATE INDEX IX_Room_Booking_Request_User_Status
-      ON dbo.Room_Booking_Request (User_id, Status);
-    END;
-
     IF OBJECT_ID('dbo.Student_Room_Booking', 'U') IS NULL
     BEGIN
       CREATE TABLE dbo.Student_Room_Booking (
         Booking_Transaction_id INT IDENTITY(1,1) NOT NULL,
         Student_id INT NOT NULL,
         Showcase_Room_id INT NOT NULL,
-        Allocated_Room_id INT NOT NULL,
+        Allocated_Room_id INT NULL,
         Payment_id INT NULL,
         Amount INT NOT NULL,
         Card_Brand NVARCHAR(30) NULL,
         Card_Last4 NVARCHAR(4) NULL,
-        Status NVARCHAR(20) NOT NULL CONSTRAINT DF_Student_Room_Booking_Status DEFAULT 'Completed',
+        Status NVARCHAR(20) NOT NULL CONSTRAINT DF_Student_Room_Booking_Status DEFAULT 'Pending',
         Booked_At DATETIME NOT NULL CONSTRAINT DF_Student_Room_Booking_Booked_At DEFAULT GETDATE(),
         CONSTRAINT PK_Student_Room_Booking PRIMARY KEY (Booking_Transaction_id),
         CONSTRAINT FK_Student_Room_Booking_Student FOREIGN KEY (Student_id)
@@ -416,9 +406,60 @@ const ensurePublicRoomShowcaseTable = async () => {
         CONSTRAINT FK_Student_Room_Booking_Showcase FOREIGN KEY (Showcase_Room_id)
           REFERENCES dbo.Public_Room_Showcase(Showcase_Room_id),
         CONSTRAINT FK_Student_Room_Booking_AllocatedRoom FOREIGN KEY (Allocated_Room_id)
-          REFERENCES dbo.Room(Room_id)
+          REFERENCES dbo.Room(Room_id),
+        CONSTRAINT CK_Student_Room_Booking_Status CHECK (Status IN ('Pending', 'Approved', 'Rejected'))
       );
 
+      CREATE INDEX IX_Student_Room_Booking_Student
+      ON dbo.Student_Room_Booking (Student_id, Booked_At DESC);
+    END;
+
+    IF COL_LENGTH('dbo.Student_Room_Booking', 'Allocated_Room_id') IS NOT NULL
+    BEGIN
+      ALTER TABLE dbo.Student_Room_Booking ALTER COLUMN Allocated_Room_id INT NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Student_Room_Booking', 'Payment_id') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Student_Room_Booking ADD Payment_id INT NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Student_Room_Booking', 'Card_Brand') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Student_Room_Booking ADD Card_Brand NVARCHAR(30) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Student_Room_Booking', 'Card_Last4') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Student_Room_Booking ADD Card_Last4 NVARCHAR(4) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Student_Room_Booking', 'Status') IS NOT NULL
+    BEGIN
+      UPDATE dbo.Student_Room_Booking
+      SET Status = 'Approved'
+      WHERE Status = 'Completed';
+    END;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.check_constraints
+      WHERE name = 'CK_Student_Room_Booking_Status'
+        AND parent_object_id = OBJECT_ID('dbo.Student_Room_Booking')
+    )
+    BEGIN
+      ALTER TABLE dbo.Student_Room_Booking
+      ADD CONSTRAINT CK_Student_Room_Booking_Status
+      CHECK (Status IN ('Pending', 'Approved', 'Rejected'));
+    END;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.indexes
+      WHERE object_id = OBJECT_ID('dbo.Student_Room_Booking')
+        AND name = 'IX_Student_Room_Booking_Student'
+    )
+    BEGIN
       CREATE INDEX IX_Student_Room_Booking_Student
       ON dbo.Student_Room_Booking (Student_id, Booked_At DESC);
     END;
@@ -1143,20 +1184,30 @@ const publicRoomShowcaseSelectQuery = `
 
 const studentRoomBookingSelectQuery = `
   SELECT
-    srb.Booking_id AS id,
-    srb.Booking_id AS booking_id,
-    srb.Showcase_Room_id AS room_id,
+    sb.Booking_Transaction_id AS id,
+    sb.Booking_Transaction_id AS booking_id,
+    sb.Showcase_Room_id AS room_id,
     prs.Room_Name AS room_title,
     prs.Category AS room_category,
     CONCAT('$', prs.Price_Min, ' - $', prs.Price_Max, ' ', prs.Price_Unit) AS price_range,
-    srb.Requested_At AS requested_at,
-    srb.Status AS status,
+    sb.Payment_id AS payment_id,
+    sb.Amount AS amount,
+    sb.Card_Brand AS card_brand,
+    sb.Card_Last4 AS card_last4,
+    sb.Allocated_Room_id AS allocated_room_id,
+    r.Room_Number AS allocated_room_number,
+    hb.Block_Name AS allocated_block_name,
+    sb.Booked_At AS requested_at,
+    sb.Status AS status,
     s.Student_id AS student_id,
     s.Name AS student_name,
-    s.Email AS student_email
-  FROM Student_Room_Booking_Request srb
-  INNER JOIN Public_Room_Showcase prs ON prs.Showcase_Room_id = srb.Showcase_Room_id
-  INNER JOIN ${STUDENT_TABLE} s ON s.Student_id = srb.Student_id
+    s.Email AS student_email,
+    s.PhoneNumber AS student_phone
+  FROM Student_Room_Booking sb
+  INNER JOIN Public_Room_Showcase prs ON prs.Showcase_Room_id = sb.Showcase_Room_id
+  INNER JOIN ${STUDENT_TABLE} s ON s.Student_id = sb.Student_id
+  LEFT JOIN Room r ON r.Room_id = sb.Allocated_Room_id
+  LEFT JOIN Hostel_Block hb ON hb.Block_id = r.Hostel_Block
 `;
 
 const blockSelectQuery = `
@@ -1166,19 +1217,6 @@ const blockSelectQuery = `
     hb.Block_Name AS block_name,
     hb.Total_Rooms AS total_rooms
   FROM Hostel_Block hb
-`;
-
-const visitorSelectQuery = `
-  SELECT
-    v.Visitor_id AS id,
-    v.Visitor_id AS visitor_id,
-    v.Student_id AS student_id,
-    s.Name AS student_name,
-    v.Date_time_Entry AS entry_time,
-    v.Date_time_Exit AS exit_time,
-    v.Purpose AS purpose
-  FROM Visitor v
-  LEFT JOIN ${STUDENT_TABLE} s ON s.Student_id = v.Student_id
 `;
 
 const paymentSelectQuery = `
@@ -1257,14 +1295,14 @@ const getBlockById = (blockId) =>
     request.input("id", sql.Int, blockId)
   );
 
-const getVisitorById = (visitorId) =>
-  queryOne(`${visitorSelectQuery} WHERE v.Visitor_id = @id`, (request) =>
-    request.input("id", sql.Int, visitorId)
-  );
-
 const getPaymentById = (paymentId) =>
   queryOne(`${paymentSelectQuery} WHERE p.Payment_id = @id`, (request) =>
     request.input("id", sql.Int, paymentId)
+  );
+
+const getBookingById = (bookingId) =>
+  queryOne(`${bookingSelectQuery} WHERE sb.Booking_Transaction_id = @id`, (request) =>
+    request.input("id", sql.Int, bookingId)
   );
 
 const getStudentBookingsByStudentId = (studentId) =>
@@ -2846,8 +2884,8 @@ const getStudentDashboard = async (req, res) => {
       queryRows(
         `
           ${studentRoomBookingSelectQuery}
-          WHERE srb.Student_id = @studentId
-          ORDER BY srb.Requested_At DESC, srb.Booking_id DESC
+          WHERE sb.Student_id = @studentId
+          ORDER BY sb.Booked_At DESC, sb.Booking_Transaction_id DESC
         `,
         (request) => request.input("studentId", sql.Int, studentId)
       ),
@@ -2910,7 +2948,7 @@ protectedRouter.get(
         (SELECT COUNT(*) FROM Room WHERE Current_Occupancy >= Capacity) AS occupiedRooms,
         (SELECT COUNT(*) FROM Room WHERE Current_Occupancy < Capacity) AS availableRooms,
         CAST(0 AS INT) AS pendingMaintenance,
-        (SELECT COUNT(*) FROM Student_Room_Booking_Request WHERE Status = 'Pending') AS pendingBookingRequests,
+        (SELECT COUNT(*) FROM Student_Room_Booking WHERE Status = 'Pending') AS pendingBookingRequests,
         (SELECT ISNULL(SUM(Amount), 0) FROM Payment) AS totalCollection
     `);
 
@@ -2938,12 +2976,12 @@ protectedRouter.get(
       return;
     }
 
-    const whereClause = normalizedStatus ? "WHERE srb.Status = @status" : "";
+    const whereClause = normalizedStatus ? "WHERE sb.Status = @status" : "";
     const rows = await queryRows(
       `
         ${studentRoomBookingSelectQuery}
         ${whereClause}
-        ORDER BY srb.Requested_At DESC, srb.Booking_id DESC
+        ORDER BY sb.Booked_At DESC, sb.Booking_Transaction_id DESC
       `,
       normalizedStatus
         ? (request) => request.input("status", sql.NVarChar(20), normalizedStatus)
@@ -2951,6 +2989,155 @@ protectedRouter.get(
     );
 
     res.json(rows);
+  })
+);
+
+protectedRouter.put(
+  "/booking-requests/:id",
+  asyncHandler(async (req, res) => {
+    await ensureDefaultRoomInventory();
+    await refreshPublicRoomAvailability();
+
+    const bookingId = parsePositiveInt(req.params.id);
+    const requestedStatus = normalizeString(req.body.status || "Approved");
+    const normalizedStatus =
+      requestedStatus.toLowerCase() === "accepted"
+        ? "Approved"
+        : BOOKING_REQUEST_STATUSES.find(
+            (status) => status.toLowerCase() === requestedStatus.toLowerCase()
+          );
+
+    if (!bookingId) {
+      res.status(400).json({ message: "A valid booking request ID is required." });
+      return;
+    }
+
+    if (!normalizedStatus) {
+      res.status(400).json({
+        message: `Invalid status. Allowed values: ${BOOKING_REQUEST_STATUSES.join(", ")}.`,
+      });
+      return;
+    }
+
+    const existingBooking = await getBookingById(bookingId);
+
+    if (!existingBooking) {
+      res.status(404).json({ message: "Booking request not found." });
+      return;
+    }
+
+    if (existingBooking.status === normalizedStatus) {
+      res.json(existingBooking);
+      return;
+    }
+
+    if (existingBooking.status !== "Pending") {
+      res.status(409).json({ message: "Only pending booking requests can be updated." });
+      return;
+    }
+
+    const student = await queryOne(
+      `
+        SELECT
+          Student_id AS student_id,
+          Room_id AS room_id
+        FROM ${STUDENT_TABLE}
+        WHERE Student_id = @studentId
+      `,
+      (request) => request.input("studentId", sql.Int, existingBooking.student_id)
+    );
+
+    if (!student) {
+      res.status(404).json({ message: "Student account not found." });
+      return;
+    }
+
+    if (normalizedStatus === "Approved" && !existingBooking.payment_id) {
+      res.status(400).json({ message: "A payment record is required before approval." });
+      return;
+    }
+
+    let allocatedRoom = null;
+
+    if (normalizedStatus === "Approved") {
+      allocatedRoom =
+        existingBooking.allocated_room_id
+          ? await getRoomById(existingBooking.allocated_room_id)
+          : await getPreferredAvailableRoomForCategory(existingBooking.requested_room_category);
+
+      if (!allocatedRoom) {
+        await refreshPublicRoomAvailability({ force: true });
+        res.status(409).json({
+          message:
+            "No physical rooms are currently available for this booking. Availability has been refreshed.",
+        });
+        return;
+      }
+
+      const roomAvailability = await getRoomAvailability(allocatedRoom.room_id);
+
+      if (
+        !roomAvailability ||
+        Number(roomAvailability.current_occupancy || 0) >= Number(roomAvailability.capacity || 0)
+      ) {
+        await refreshPublicRoomAvailability({ force: true });
+        res.status(409).json({
+          message: "The selected room was just taken. Please refresh and try approving again.",
+        });
+        return;
+      }
+    }
+
+    const pool = await getPool();
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    try {
+      if (normalizedStatus === "Approved") {
+        await transaction
+          .request()
+          .input("studentId", sql.Int, existingBooking.student_id)
+          .input("roomId", sql.Int, allocatedRoom.room_id)
+          .query(`
+            UPDATE ${STUDENT_TABLE}
+            SET Room_id = @roomId
+            WHERE Student_id = @studentId
+          `);
+      }
+
+      await transaction
+        .request()
+        .input("bookingId", sql.Int, bookingId)
+        .input("status", sql.NVarChar(20), normalizedStatus)
+        .input("roomId", sql.Int, allocatedRoom?.room_id || null)
+        .query(`
+          UPDATE Student_Room_Booking
+          SET Status = @status,
+              Allocated_Room_id = CASE
+                WHEN @status = 'Approved' THEN @roomId
+                ELSE Allocated_Room_id
+              END
+          WHERE Booking_Transaction_id = @bookingId
+        `);
+
+      await transaction.commit();
+    } catch (error) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        // Ignore rollback errors and surface the original failure.
+      }
+      throw error;
+    }
+
+    if (normalizedStatus === "Approved") {
+      await reseedRoommatesForStudent(existingBooking.student_id, allocatedRoom.room_id);
+      await syncRoomOccupancy([student.room_id, allocatedRoom.room_id]);
+      await refreshPublicRoomAvailability({ force: true });
+    }
+
+    const updatedBooking = await getBookingById(bookingId);
+    res.json(updatedBooking);
   })
 );
 
@@ -3253,7 +3440,6 @@ protectedRouter.delete(
       `
         DELETE FROM Student_Roommate_Profile WHERE Student_id = @studentId;
         DELETE FROM Student_Room_Booking WHERE Student_id = @studentId;
-        DELETE FROM Visitor WHERE Student_id = @studentId;
         DELETE FROM Payment WHERE Student_id = @studentId;
         DELETE FROM ${STUDENT_TABLE} WHERE Student_id = @studentId;
       `,
@@ -3596,180 +3782,6 @@ protectedRouter.delete(
     );
 
     res.json({ message: "Block deleted successfully." });
-  })
-);
-
-protectedRouter.get(
-  "/visitors",
-  asyncHandler(async (req, res) => {
-    const rows = await queryRows(`${visitorSelectQuery} ORDER BY v.Date_time_Entry DESC`);
-
-    res.json(rows);
-  })
-);
-
-protectedRouter.post(
-  "/visitors",
-  asyncHandler(async (req, res) => {
-    const studentId = parsePositiveInt(req.body.student_id);
-    const purpose = normalizeString(req.body.purpose);
-    const entryTime = parseDateTimeValue(req.body.entry_time);
-    const exitTime = parseDateTimeValue(req.body.exit_time);
-
-    if (!studentId) {
-      res.status(400).json({ message: "Please choose a valid student." });
-      return;
-    }
-
-    if (!purpose) {
-      res.status(400).json({ message: "Purpose is required." });
-      return;
-    }
-
-    if (!entryTime) {
-      res.status(400).json({ message: "Entry time is required." });
-      return;
-    }
-
-    if (exitTime && exitTime.getTime() < entryTime.getTime()) {
-      res.status(400).json({ message: "Exit time cannot be earlier than entry time." });
-      return;
-    }
-
-    const student = await queryOne(
-      `SELECT Student_id AS student_id FROM ${STUDENT_TABLE} WHERE Student_id = @studentId`,
-      (request) => request.input("studentId", sql.Int, studentId)
-    );
-
-    if (!student) {
-      res.status(400).json({ message: "The selected student does not exist." });
-      return;
-    }
-
-    const visitorId = await getNextId("Visitor", "Visitor_id");
-
-    await executeQuery(
-      `
-        INSERT INTO Visitor (Visitor_id, Student_id, Date_time_Entry, Date_time_Exit, Purpose)
-        VALUES (@visitorId, @studentId, @entryTime, @exitTime, @purpose)
-      `,
-      (request) =>
-        request
-          .input("visitorId", sql.Int, visitorId)
-          .input("studentId", sql.Int, studentId)
-          .input("entryTime", sql.DateTime, entryTime)
-          .input("exitTime", sql.DateTime, exitTime)
-          .input("purpose", sql.NVarChar(255), purpose)
-    );
-
-    const visitor = await getVisitorById(visitorId);
-    res.status(201).json(visitor);
-  })
-);
-
-protectedRouter.put(
-  "/visitors/:id",
-  asyncHandler(async (req, res) => {
-    const visitorId = parsePositiveInt(req.params.id);
-    const studentId = parsePositiveInt(req.body.student_id);
-    const purpose = normalizeString(req.body.purpose);
-    const entryTime = parseDateTimeValue(req.body.entry_time);
-    const exitTime = parseDateTimeValue(req.body.exit_time);
-
-    if (!visitorId) {
-      res.status(400).json({ message: "A valid visitor ID is required." });
-      return;
-    }
-
-    if (!studentId) {
-      res.status(400).json({ message: "Please choose a valid student." });
-      return;
-    }
-
-    if (!purpose) {
-      res.status(400).json({ message: "Purpose is required." });
-      return;
-    }
-
-    if (!entryTime) {
-      res.status(400).json({ message: "Entry time is required." });
-      return;
-    }
-
-    if (exitTime && exitTime.getTime() < entryTime.getTime()) {
-      res.status(400).json({ message: "Exit time cannot be earlier than entry time." });
-      return;
-    }
-
-    const existingVisitor = await queryOne(
-      "SELECT Visitor_id AS visitor_id FROM Visitor WHERE Visitor_id = @visitorId",
-      (request) => request.input("visitorId", sql.Int, visitorId)
-    );
-
-    if (!existingVisitor) {
-      res.status(404).json({ message: "Visitor record not found." });
-      return;
-    }
-
-    const student = await queryOne(
-      `SELECT Student_id AS student_id FROM ${STUDENT_TABLE} WHERE Student_id = @studentId`,
-      (request) => request.input("studentId", sql.Int, studentId)
-    );
-
-    if (!student) {
-      res.status(400).json({ message: "The selected student does not exist." });
-      return;
-    }
-
-    await executeQuery(
-      `
-        UPDATE Visitor
-        SET Student_id = @studentId,
-            Date_time_Entry = @entryTime,
-            Date_time_Exit = @exitTime,
-            Purpose = @purpose
-        WHERE Visitor_id = @visitorId
-      `,
-      (request) =>
-        request
-          .input("visitorId", sql.Int, visitorId)
-          .input("studentId", sql.Int, studentId)
-          .input("entryTime", sql.DateTime, entryTime)
-          .input("exitTime", sql.DateTime, exitTime)
-          .input("purpose", sql.NVarChar(255), purpose)
-    );
-
-    const visitor = await getVisitorById(visitorId);
-    res.json(visitor);
-  })
-);
-
-protectedRouter.delete(
-  "/visitors/:id",
-  asyncHandler(async (req, res) => {
-    const visitorId = parsePositiveInt(req.params.id);
-
-    if (!visitorId) {
-      res.status(400).json({ message: "A valid visitor ID is required." });
-      return;
-    }
-
-    const existingVisitor = await queryOne(
-      "SELECT Visitor_id AS visitor_id FROM Visitor WHERE Visitor_id = @visitorId",
-      (request) => request.input("visitorId", sql.Int, visitorId)
-    );
-
-    if (!existingVisitor) {
-      res.status(404).json({ message: "Visitor record not found." });
-      return;
-    }
-
-    await executeQuery(
-      "DELETE FROM Visitor WHERE Visitor_id = @visitorId",
-      (request) => request.input("visitorId", sql.Int, visitorId)
-    );
-
-    res.json({ message: "Visitor deleted successfully." });
   })
 );
 
@@ -4212,25 +4224,20 @@ app.post(
       return;
     }
 
-    const allocatedRoom = await getPreferredAvailableRoomForCategory(showcaseRoom.category);
+    const pendingBooking = await queryOne(
+      `
+        SELECT TOP 1 Booking_Transaction_id AS booking_id
+        FROM Student_Room_Booking
+        WHERE Student_id = @studentId
+          AND Status = 'Pending'
+      `,
+      (request) => request.input("studentId", sql.Int, studentId)
+    );
 
-    if (!allocatedRoom) {
-      await refreshPublicRoomAvailability({ force: true });
+    if (pendingBooking) {
       res.status(409).json({
         message:
-          "No physical rooms are currently available for allocation. Availability has been refreshed. Please try another available room card.",
-      });
-      return;
-    }
-
-    const roomAvailability = await getRoomAvailability(allocatedRoom.room_id);
-
-    if (
-      !roomAvailability ||
-      Number(roomAvailability.current_occupancy || 0) >= Number(roomAvailability.capacity || 0)
-    ) {
-      res.status(409).json({
-        message: "The selected room was just taken. Please retry to allocate another room.",
+          "You already have a pending room booking request. Please wait for admin approval before submitting another one.",
       });
       return;
     }
@@ -4251,22 +4258,13 @@ app.post(
         year: "numeric",
       });
     const paymentId = await getNextId("Payment", "Payment_id");
+    let bookingId = null;
 
     const pool = await getPool();
     const transaction = new sql.Transaction(pool);
     await transaction.begin();
 
     try {
-      await transaction
-        .request()
-        .input("studentId", sql.Int, studentId)
-        .input("roomId", sql.Int, allocatedRoom.room_id)
-        .query(`
-          UPDATE ${STUDENT_TABLE}
-          SET Room_id = @roomId
-          WHERE Student_id = @studentId
-        `);
-
       await transaction
         .request()
         .input("paymentId", sql.Int, paymentId)
@@ -4279,31 +4277,29 @@ app.post(
           VALUES (@paymentId, @studentId, @amount, @paymentDate, @month)
         `);
 
-      await transaction
+      const insertBookingResult = await transaction
         .request()
         .input("studentId", sql.Int, studentId)
         .input("showcaseRoomId", sql.Int, showcaseRoom.id)
-        .input("allocatedRoomId", sql.Int, allocatedRoom.room_id)
         .input("paymentId", sql.Int, paymentId)
         .input("amount", sql.Int, amount)
         .input("cardBrand", sql.NVarChar(30), cardBrand)
         .input("cardLast4", sql.NVarChar(4), cardLast4 || null)
-        .input("status", sql.NVarChar(20), "Completed")
+        .input("status", sql.NVarChar(20), "Pending")
         .query(`
           INSERT INTO Student_Room_Booking (
             Student_id,
             Showcase_Room_id,
-            Allocated_Room_id,
             Payment_id,
             Amount,
             Card_Brand,
             Card_Last4,
             Status
           )
+          OUTPUT INSERTED.Booking_Transaction_id AS booking_id
           VALUES (
             @studentId,
             @showcaseRoomId,
-            @allocatedRoomId,
             @paymentId,
             @amount,
             @cardBrand,
@@ -4311,6 +4307,8 @@ app.post(
             @status
           )
         `);
+
+      bookingId = parsePositiveInt(insertBookingResult.recordset?.[0]?.booking_id);
 
       await transaction.commit();
     } catch (error) {
@@ -4322,17 +4320,15 @@ app.post(
       throw error;
     }
 
-    const roommateProfiles = await reseedRoommatesForStudent(studentId, allocatedRoom.room_id);
-    await syncRoomOccupancy([allocatedRoom.room_id]);
-    await refreshPublicRoomAvailability({ force: true });
-
     const payment = await getPaymentById(paymentId);
     const profile = await getStudentAuthProfileById(studentId);
+    const booking = bookingId ? await getBookingById(bookingId) : null;
 
     res.status(201).json({
-      message: "Payment successful. DONE BOOKING.",
-      bookingStatus: "DONE BOOKING",
+      message: "Payment recorded. Your booking request is now pending admin approval.",
+      bookingStatus: "Pending",
       paymentMethod: cardLast4 ? `Card ending in ${cardLast4}` : "Card payment",
+      booking,
       room: {
         requested: {
           id: showcaseRoom.id,
@@ -4341,14 +4337,6 @@ app.post(
           capacity: showcaseRoom.capacity,
           priceRange: showcaseRoom.price_range,
         },
-        allocated: {
-          room_id: allocatedRoom.room_id,
-          room_number: allocatedRoom.room_number,
-          room_type: allocatedRoom.room_type,
-          block_name: allocatedRoom.block_name,
-          capacity: allocatedRoom.capacity,
-          current_occupancy: Number(allocatedRoom.current_occupancy || 0) + 1,
-        },
       },
       payment: {
         ...payment,
@@ -4356,7 +4344,7 @@ app.post(
         card_brand: cardBrand || null,
       },
       profile,
-      roommateProfiles,
+      roommateProfiles: [],
     });
   })
 );
@@ -4464,41 +4452,26 @@ app.post(
 
     const pendingBooking = await queryOne(
       `
-        SELECT TOP 1 Booking_id AS booking_id
-        FROM Student_Room_Booking_Request
-        WHERE Showcase_Room_id = @roomId
-          AND Student_id = @studentId
+        SELECT TOP 1 Booking_Transaction_id AS booking_id
+        FROM Student_Room_Booking
+        WHERE Student_id = @studentId
           AND Status = 'Pending'
       `,
       (request) =>
         request
-          .input("roomId", sql.Int, roomId)
           .input("studentId", sql.Int, studentId)
     );
 
     if (pendingBooking) {
-      res.status(409).json({ message: "You already have a pending booking request for this room." });
+      res.status(409).json({
+        message:
+          "You already have a pending booking request. Please wait for admin approval before selecting another room.",
+      });
       return;
     }
 
-    const insertResult = await executeQuery(
-      `
-        INSERT INTO Student_Room_Booking_Request (Showcase_Room_id, Student_id, Status)
-        OUTPUT INSERTED.Booking_id AS booking_id, INSERTED.Status AS status, INSERTED.Requested_At AS requested_at
-        VALUES (@roomId, @studentId, @status)
-      `,
-      (request) =>
-        request
-          .input("roomId", sql.Int, roomId)
-          .input("studentId", sql.Int, studentId)
-          .input("status", sql.NVarChar(20), BOOKING_REQUEST_STATUSES[0])
-    );
-
-    const booking = insertResult.recordset?.[0] || null;
-
-    res.status(201).json({
-      message: "Booking request sent successfully.",
-      booking,
+    res.json({
+      message: "Room selected successfully. Continue to payment to submit your booking request.",
       room: {
         id: room.id,
         title: room.title,
@@ -4508,6 +4481,7 @@ app.post(
         id: student.student_id,
         name: student.name,
       },
+      nextPath: `/student/payment?roomId=${room.id}`,
     });
   })
 );

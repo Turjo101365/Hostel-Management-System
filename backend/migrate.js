@@ -52,12 +52,11 @@ async function migrate() {
     console.log("📊 Tables created:");
     console.log("   - Users");
     console.log("   - Public_Room_Showcase");
-    console.log("   - Room_Booking_Request");
     console.log("   - Hostel_Block");
     console.log("   - Room");
     console.log("   - Students");
-    console.log("   - Visitor");
     console.log("   - Payment");
+    console.log("   - Student_Room_Booking");
     console.log("   - Fee_Structure");
     console.log("   - Mess_Menu");
     console.log("   - Maintenance");

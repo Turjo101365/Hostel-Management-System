@@ -9,7 +9,6 @@ import Dashboard from './pages/dashboard'
 import Students from './pages/Students'
 import Rooms from './pages/Rooms'
 import Blocks from './pages/Blocks'
-import Visitors from './pages/Visitors'
 import Bookings from './pages/Bookings'
 import Payments from './pages/Payments'
 import FeeStructure from './pages/FeeStructure'
@@ -90,7 +89,6 @@ const AppContent = () => {
           <Route path="students" element={<Students />} />
           <Route path="rooms" element={<Rooms />} />
           <Route path="blocks" element={<Blocks />} />
-          <Route path="visitors" element={<Visitors />} />
           <Route path="bookings" element={<Bookings />} />
           <Route path="payments" element={<Payments />} />
           <Route path="fees" element={<FeeStructure />} />
@@ -107,7 +105,6 @@ const AppContent = () => {
         <Route path="/dashboard" element={<Navigate to="/admin" replace />} />
         <Route path="/students" element={<Navigate to="/admin/students" replace />} />
         <Route path="/blocks" element={<Navigate to="/admin/blocks" replace />} />
-        <Route path="/visitors" element={<Navigate to="/admin/visitors" replace />} />
         <Route path="/bookings" element={<Navigate to="/admin/bookings" replace />} />
         <Route path="/payments" element={<Navigate to="/admin/payments" replace />} />
         <Route path="/fees" element={<Navigate to="/admin/fees" replace />} />

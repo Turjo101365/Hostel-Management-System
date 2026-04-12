@@ -5,7 +5,6 @@ import {
   Building2,
   CalendarDays,
   ClipboardCheck,
-  ClipboardList,
   CreditCard,
   DoorOpen,
   Users,
@@ -34,7 +33,6 @@ const quickLinks = [
   { to: '/admin/bookings', label: 'Bookings', description: 'Inspect student booking logs', icon: ClipboardCheck, tone: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300' },
   { to: '/admin/payments', label: 'Payments', description: 'Monitor recent collections', icon: CreditCard, tone: 'bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300' },
   { to: '/admin/maintenance', label: 'Maintenance', description: 'Handle pending work', icon: Wrench, tone: 'bg-orange-50 text-orange-700 dark:bg-orange-950/30 dark:text-orange-300' },
-  { to: '/admin/visitors', label: 'Visitors', description: 'Audit visit records', icon: ClipboardList, tone: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/30 dark:text-cyan-300' },
   { to: '/admin/leaves', label: 'Leaves', description: 'Watch leave approvals', icon: CalendarDays, tone: 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-950/30 dark:text-fuchsia-300' },
 ]
 
@@ -68,6 +66,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteLoading, setInviteLoading] = useState(false)
+  const [approvingBookingId, setApprovingBookingId] = useState(null)
 
   const loadDashboard = async () => {
     setLoading(true)
@@ -122,6 +121,21 @@ const Dashboard = () => {
       toast.error(message)
     } finally {
       setInviteLoading(false)
+    }
+  }
+
+  const handleApproveBooking = async (bookingId) => {
+    setApprovingBookingId(bookingId)
+
+    try {
+      const response = await bookingRequestsService.updateStatus(bookingId, { status: 'Approved' })
+      toast.success(response?.status === 'Approved' ? 'Booking approved successfully.' : 'Booking updated successfully.')
+      await loadDashboard()
+    } catch (error) {
+      const message = error.response?.data?.message || 'Failed to approve this booking request.'
+      toast.error(message)
+    } finally {
+      setApprovingBookingId(null)
     }
   }
 
@@ -309,11 +323,24 @@ const Dashboard = () => {
                         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           {booking.student_email || 'Email not available'}
                         </p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          Payment: {formatCurrency(booking.amount)} • {booking.card_brand || 'Card'}{booking.card_last4 ? ` ending ${booking.card_last4}` : ''}
+                        </p>
                         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                           Requested on {formatDateTime(booking.requested_at)}
                         </p>
                       </div>
-                      <Badge variant={getBookingBadgeVariant(booking.status)}>{booking.status}</Badge>
+                      <div className="flex flex-col items-end gap-2">
+                        <Badge variant={getBookingBadgeVariant(booking.status)}>{booking.status}</Badge>
+                        <Button
+                          type="button"
+                          size="sm"
+                          loading={approvingBookingId === booking.booking_id}
+                          onClick={() => handleApproveBooking(booking.booking_id)}
+                        >
+                          Accept
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ))
