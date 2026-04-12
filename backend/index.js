@@ -14,6 +14,11 @@ const PORT = Number(process.env.PORT || 5000);
 const JWT_SECRET = process.env.JWT_SECRET || "change-this-jwt-secret";
 const RESET_CODE_TTL_MINUTES = Number(process.env.RESET_CODE_TTL_MINUTES || 15);
 const FIXED_SUPER_ADMIN_EMAIL = "feroz.alam4103@gmail.com";
+const FIXED_SUPER_ADMIN_NAME = "Super Admin";
+const FIXED_SUPER_ADMIN_PASSWORD_HASH =
+  "$2b$10$c9e7.XiRARrD06b6EO4/UeQ3evi71IL2RscUXmzadNkR3ltYbNY0e";
+const LEGACY_FIXED_SUPER_ADMIN_PASSWORD_HASH =
+  "$2b$10$BMj2WlbGqsYJvOL7LqGlGe7FhR72qhjUQCcjXvVXfox0wbP.JX40i";
 const CLIENT_ORIGINS = [
   process.env.CLIENT_ORIGIN,
   "http://localhost:5173",
@@ -517,6 +522,60 @@ const normalizeNullableString = (value) => {
   return normalized ? normalized : null;
 };
 
+const ensureFixedSuperAdminAccount = async () => {
+  await ensureUserColumns();
+
+  const existingSuperAdmin = await queryOne(
+    `
+      SELECT
+        id,
+        passwordHash
+      FROM Users
+      WHERE email = @email
+    `,
+    (request) => request.input("email", sql.NVarChar(100), FIXED_SUPER_ADMIN_EMAIL)
+  );
+
+  if (!existingSuperAdmin) {
+    await executeQuery(
+      `
+        INSERT INTO Users (email, fullName, Role, passwordHash)
+        VALUES (@email, @fullName, 'SuperAdmin', @passwordHash)
+      `,
+      (request) =>
+        request
+          .input("email", sql.NVarChar(100), FIXED_SUPER_ADMIN_EMAIL)
+          .input("fullName", sql.NVarChar(120), FIXED_SUPER_ADMIN_NAME)
+          .input("passwordHash", sql.NVarChar(255), FIXED_SUPER_ADMIN_PASSWORD_HASH)
+    );
+    return;
+  }
+
+  const usesLegacyPasswordHash =
+    normalizeString(existingSuperAdmin.passwordHash) === LEGACY_FIXED_SUPER_ADMIN_PASSWORD_HASH;
+
+  await executeQuery(
+    `
+      UPDATE Users
+      SET fullName = @fullName,
+          Role = 'SuperAdmin'
+          ${usesLegacyPasswordHash ? ", passwordHash = @passwordHash" : ""}
+      WHERE email = @email
+    `,
+    (request) => {
+      request
+        .input("email", sql.NVarChar(100), FIXED_SUPER_ADMIN_EMAIL)
+        .input("fullName", sql.NVarChar(120), FIXED_SUPER_ADMIN_NAME);
+
+      if (usesLegacyPasswordHash) {
+        request.input("passwordHash", sql.NVarChar(255), FIXED_SUPER_ADMIN_PASSWORD_HASH);
+      }
+
+      return request;
+    }
+  );
+};
+
 const parsePositiveInt = (value) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -607,8 +666,6 @@ const DAY_ORDER_CASE = `
 `;
 
 const MESS_MEAL_TYPES = ["Breakfast", "Lunch", "Dinner"];
-const MAINTENANCE_STATUSES = ["Pending", "In Progress", "Completed"];
-const LEAVE_STATUSES = ["Pending", "Approved", "Rejected"];
 const BOOKING_REQUEST_STATUSES = ["Pending", "Approved", "Rejected"];
 const PUBLIC_ROOM_CATEGORIES = ["single", "double", "triple", "shared"];
 const PUBLIC_ROOM_CATEGORY_LABELS = {
@@ -1138,15 +1195,6 @@ const paymentSelectQuery = `
   LEFT JOIN ${STUDENT_TABLE} s ON s.Student_id = p.Student_id
 `;
 
-const feeSelectQuery = `
-  SELECT
-    f.Fee_id AS id,
-    f.Fee_id AS fee_id,
-    f.Type AS type,
-    f.Amount AS amount
-  FROM Fee_Structure f
-`;
-
 const messSelectQuery = `
   SELECT
     [Day] AS id,
@@ -1156,34 +1204,6 @@ const messSelectQuery = `
     MAX(CASE WHEN Meal_type = 'Dinner' THEN Items END) AS dinner
   FROM Mess_Menu
   GROUP BY [Day]
-`;
-
-const maintenanceSelectQuery = `
-  SELECT
-    m.Request_id AS id,
-    m.Request_id AS request_id,
-    m.Room_id AS room_id,
-    r.Room_Number AS room_number,
-    m.Issue_type AS issue_type,
-    CONCAT(m.Issue_type, ' issue reported for room ', r.Room_Number) AS description,
-    m.Date_Reported AS date_reported,
-    m.Status AS status
-  FROM Maintenance m
-  LEFT JOIN Room r ON r.Room_id = m.Room_id
-`;
-
-const leaveSelectQuery = `
-  SELECT
-    l.leave_id AS id,
-    l.leave_id AS leave_id,
-    l.student_id AS student_id,
-    s.Name AS student_name,
-    l.from_date AS from_date,
-    l.to_date AS to_date,
-    l.reason AS reason,
-    l.Status AS status
-  FROM Leave_Request l
-  LEFT JOIN ${STUDENT_TABLE} s ON s.Student_id = l.student_id
 `;
 
 const bookingSelectQuery = `
@@ -1253,24 +1273,9 @@ const getStudentBookingsByStudentId = (studentId) =>
     (request) => request.input("studentId", sql.Int, studentId)
   );
 
-const getFeeById = (feeId) =>
-  queryOne(`${feeSelectQuery} WHERE f.Fee_id = @id`, (request) =>
-    request.input("id", sql.Int, feeId)
-  );
-
 const getMessDayById = (day) =>
   queryOne(`${messSelectQuery} HAVING [Day] = @day`, (request) =>
     request.input("day", sql.NVarChar(20), day)
-  );
-
-const getMaintenanceById = (requestId) =>
-  queryOne(`${maintenanceSelectQuery} WHERE m.Request_id = @id`, (request) =>
-    request.input("id", sql.Int, requestId)
-  );
-
-const getLeaveById = (leaveId) =>
-  queryOne(`${leaveSelectQuery} WHERE l.leave_id = @id`, (request) =>
-    request.input("id", sql.Int, leaveId)
   );
 
 const getRoommateProfilesByStudentId = (studentId) =>
@@ -2070,6 +2075,7 @@ const loginUser = async (req, res) => {
   }
 
   await ensureUserColumns();
+  await ensureFixedSuperAdminAccount();
 
   const pool = await getPool();
   const userRecord = await queryOne(
@@ -2819,7 +2825,7 @@ const getStudentDashboard = async (req, res) => {
     return;
   }
 
-  const [paymentSummary, leaveSummary, recentPayments, recentLeaves, currentRoommateProfiles, studentBookings] =
+  const [paymentSummary, recentPayments, currentRoommateProfiles, studentBookings, studentBookingRequests] =
     await Promise.all([
       queryOne(
         `
@@ -2831,27 +2837,20 @@ const getStudentDashboard = async (req, res) => {
         `,
         (request) => request.input("studentId", sql.Int, studentId)
       ),
-      queryOne(
-        `
-          SELECT
-            COUNT(*) AS total_leaves,
-            SUM(CASE WHEN Status = 'Pending' THEN 1 ELSE 0 END) AS pending_leaves,
-            SUM(CASE WHEN Status = 'Approved' THEN 1 ELSE 0 END) AS approved_leaves
-          FROM Leave_Request
-          WHERE student_id = @studentId
-        `,
-        (request) => request.input("studentId", sql.Int, studentId)
-      ),
       queryRows(
         `${paymentSelectQuery} WHERE p.Student_id = @studentId ORDER BY p.Payment_Date DESC, p.Payment_id DESC`,
         (request) => request.input("studentId", sql.Int, studentId)
       ),
-      queryRows(
-        `${leaveSelectQuery} WHERE l.student_id = @studentId ORDER BY l.from_date DESC, l.leave_id DESC`,
-        (request) => request.input("studentId", sql.Int, studentId)
-      ),
       getRoommateProfilesByStudentId(studentId),
       getStudentBookingsByStudentId(studentId),
+      queryRows(
+        `
+          ${studentRoomBookingSelectQuery}
+          WHERE srb.Student_id = @studentId
+          ORDER BY srb.Requested_At DESC, srb.Booking_id DESC
+        `,
+        (request) => request.input("studentId", sql.Int, studentId)
+      ),
     ]);
 
   const roommateProfiles =
@@ -2863,6 +2862,9 @@ const getStudentDashboard = async (req, res) => {
   const simulatedOccupancy = profile.room_id
     ? Math.min(Number(profile.room_capacity || 0), 1 + roommateCount)
     : 0;
+  const pendingBookingCount = studentBookingRequests.filter(
+    (booking) => booking.status === "Pending"
+  ).length;
 
   res.json({
     profile: {
@@ -2872,13 +2874,16 @@ const getStudentDashboard = async (req, res) => {
     summary: {
       paymentRecords: Number(paymentSummary?.payment_records || 0),
       totalPaid: Number(paymentSummary?.total_paid || 0),
-      totalLeaves: Number(leaveSummary?.total_leaves || 0),
-      pendingLeaves: Number(leaveSummary?.pending_leaves || 0),
-      approvedLeaves: Number(leaveSummary?.approved_leaves || 0),
+      totalLeaves: 0,
+      pendingLeaves: 0,
+      approvedLeaves: 0,
+      bookingRequests: studentBookingRequests.length,
+      pendingBookings: pendingBookingCount,
       roommates: roommateCount,
     },
     recentPayments: recentPayments.slice(0, 5),
-    recentLeaveRequests: recentLeaves.slice(0, 5),
+    recentLeaveRequests: [],
+    recentRoomBookings: studentBookingRequests.slice(0, 5),
     roommateProfiles,
     bookings: studentBookings,
   });
@@ -2904,7 +2909,7 @@ protectedRouter.get(
         (SELECT COUNT(*) FROM Room) AS totalRooms,
         (SELECT COUNT(*) FROM Room WHERE Current_Occupancy >= Capacity) AS occupiedRooms,
         (SELECT COUNT(*) FROM Room WHERE Current_Occupancy < Capacity) AS availableRooms,
-        (SELECT COUNT(*) FROM Maintenance WHERE Status = 'Pending') AS pendingMaintenance,
+        CAST(0 AS INT) AS pendingMaintenance,
         (SELECT COUNT(*) FROM Student_Room_Booking_Request WHERE Status = 'Pending') AS pendingBookingRequests,
         (SELECT ISNULL(SUM(Amount), 0) FROM Payment) AS totalCollection
     `);
@@ -3250,7 +3255,6 @@ protectedRouter.delete(
         DELETE FROM Student_Room_Booking WHERE Student_id = @studentId;
         DELETE FROM Visitor WHERE Student_id = @studentId;
         DELETE FROM Payment WHERE Student_id = @studentId;
-        DELETE FROM Leave_Request WHERE student_id = @studentId;
         DELETE FROM ${STUDENT_TABLE} WHERE Student_id = @studentId;
       `,
       (request) => request.input("studentId", sql.Int, studentId)
@@ -3452,10 +3456,7 @@ protectedRouter.delete(
     }
 
     await executeQuery(
-      `
-        DELETE FROM Maintenance WHERE Room_id = @roomId;
-        DELETE FROM Room WHERE Room_id = @roomId;
-      `,
+      "DELETE FROM Room WHERE Room_id = @roomId",
       (request) => request.input("roomId", sql.Int, roomId)
     );
 
@@ -3956,130 +3957,6 @@ protectedRouter.get(
 );
 
 protectedRouter.get(
-  "/fees",
-  asyncHandler(async (req, res) => {
-    const rows = await queryRows(`${feeSelectQuery} ORDER BY f.Fee_id`);
-
-    res.json(rows);
-  })
-);
-
-protectedRouter.post(
-  "/fees",
-  asyncHandler(async (req, res) => {
-    const type = normalizeString(req.body.type);
-    const amount = parsePositiveInt(req.body.amount);
-
-    if (!type) {
-      res.status(400).json({ message: "Fee type is required." });
-      return;
-    }
-
-    if (!amount) {
-      res.status(400).json({ message: "Amount must be a positive number." });
-      return;
-    }
-
-    const feeId = await getNextId("Fee_Structure", "Fee_id");
-
-    await executeQuery(
-      `
-        INSERT INTO Fee_Structure (Fee_id, Type, Amount)
-        VALUES (@feeId, @type, @amount)
-      `,
-      (request) =>
-        request
-          .input("feeId", sql.Int, feeId)
-          .input("type", sql.NVarChar(50), type)
-          .input("amount", sql.Int, amount)
-    );
-
-    const fee = await getFeeById(feeId);
-    res.status(201).json(fee);
-  })
-);
-
-protectedRouter.put(
-  "/fees/:id",
-  asyncHandler(async (req, res) => {
-    const feeId = parsePositiveInt(req.params.id);
-    const type = normalizeString(req.body.type);
-    const amount = parsePositiveInt(req.body.amount);
-
-    if (!feeId) {
-      res.status(400).json({ message: "A valid fee ID is required." });
-      return;
-    }
-
-    if (!type) {
-      res.status(400).json({ message: "Fee type is required." });
-      return;
-    }
-
-    if (!amount) {
-      res.status(400).json({ message: "Amount must be a positive number." });
-      return;
-    }
-
-    const existingFee = await queryOne(
-      "SELECT Fee_id AS fee_id FROM Fee_Structure WHERE Fee_id = @feeId",
-      (request) => request.input("feeId", sql.Int, feeId)
-    );
-
-    if (!existingFee) {
-      res.status(404).json({ message: "Fee record not found." });
-      return;
-    }
-
-    await executeQuery(
-      `
-        UPDATE Fee_Structure
-        SET Type = @type,
-            Amount = @amount
-        WHERE Fee_id = @feeId
-      `,
-      (request) =>
-        request
-          .input("feeId", sql.Int, feeId)
-          .input("type", sql.NVarChar(50), type)
-          .input("amount", sql.Int, amount)
-    );
-
-    const fee = await getFeeById(feeId);
-    res.json(fee);
-  })
-);
-
-protectedRouter.delete(
-  "/fees/:id",
-  asyncHandler(async (req, res) => {
-    const feeId = parsePositiveInt(req.params.id);
-
-    if (!feeId) {
-      res.status(400).json({ message: "A valid fee ID is required." });
-      return;
-    }
-
-    const existingFee = await queryOne(
-      "SELECT Fee_id AS fee_id FROM Fee_Structure WHERE Fee_id = @feeId",
-      (request) => request.input("feeId", sql.Int, feeId)
-    );
-
-    if (!existingFee) {
-      res.status(404).json({ message: "Fee record not found." });
-      return;
-    }
-
-    await executeQuery(
-      "DELETE FROM Fee_Structure WHERE Fee_id = @feeId",
-      (request) => request.input("feeId", sql.Int, feeId)
-    );
-
-    res.json({ message: "Fee record deleted successfully." });
-  })
-);
-
-protectedRouter.get(
   "/mess",
   asyncHandler(async (req, res) => {
     const rows = await queryRows(`${messSelectQuery} ORDER BY ${DAY_ORDER_CASE}`);
@@ -4195,379 +4072,6 @@ protectedRouter.delete(
     );
 
     res.json({ message: "Mess menu entry deleted successfully." });
-  })
-);
-
-protectedRouter.get(
-  "/maintenance",
-  asyncHandler(async (req, res) => {
-    const rows = await queryRows(`${maintenanceSelectQuery} ORDER BY m.Date_Reported DESC, m.Request_id DESC`);
-
-    res.json(rows);
-  })
-);
-
-protectedRouter.post(
-  "/maintenance",
-  asyncHandler(async (req, res) => {
-    const roomId = parsePositiveInt(req.body.room_id);
-    const issueType = normalizeString(req.body.issue_type);
-    const dateReported = parseDateValue(req.body.date_reported);
-    const status = normalizeString(req.body.status);
-
-    if (!roomId) {
-      res.status(400).json({ message: "Please choose a valid room." });
-      return;
-    }
-
-    if (!issueType) {
-      res.status(400).json({ message: "Issue type is required." });
-      return;
-    }
-
-    if (!dateReported) {
-      res.status(400).json({ message: "Date reported is required." });
-      return;
-    }
-
-    if (!isAllowedValue(status, MAINTENANCE_STATUSES)) {
-      res.status(400).json({ message: "Please choose a valid maintenance status." });
-      return;
-    }
-
-    const room = await queryOne(
-      "SELECT Room_id AS room_id FROM Room WHERE Room_id = @roomId",
-      (request) => request.input("roomId", sql.Int, roomId)
-    );
-
-    if (!room) {
-      res.status(400).json({ message: "The selected room does not exist." });
-      return;
-    }
-
-    const requestId = await getNextId("Maintenance", "Request_id");
-
-    await executeQuery(
-      `
-        INSERT INTO Maintenance (Request_id, Room_id, Issue_type, Date_Reported, Status)
-        VALUES (@requestId, @roomId, @issueType, @dateReported, @status)
-      `,
-      (request) =>
-        request
-          .input("requestId", sql.Int, requestId)
-          .input("roomId", sql.Int, roomId)
-          .input("issueType", sql.NVarChar(100), issueType)
-          .input("dateReported", sql.Date, dateReported)
-          .input("status", sql.NVarChar(20), status)
-    );
-
-    const maintenance = await getMaintenanceById(requestId);
-    res.status(201).json(maintenance);
-  })
-);
-
-protectedRouter.put(
-  "/maintenance/:id",
-  asyncHandler(async (req, res) => {
-    const requestId = parsePositiveInt(req.params.id);
-    const roomId = parsePositiveInt(req.body.room_id);
-    const issueType = normalizeString(req.body.issue_type);
-    const dateReported = parseDateValue(req.body.date_reported);
-    const status = normalizeString(req.body.status);
-
-    if (!requestId) {
-      res.status(400).json({ message: "A valid request ID is required." });
-      return;
-    }
-
-    if (!roomId) {
-      res.status(400).json({ message: "Please choose a valid room." });
-      return;
-    }
-
-    if (!issueType) {
-      res.status(400).json({ message: "Issue type is required." });
-      return;
-    }
-
-    if (!dateReported) {
-      res.status(400).json({ message: "Date reported is required." });
-      return;
-    }
-
-    if (!isAllowedValue(status, MAINTENANCE_STATUSES)) {
-      res.status(400).json({ message: "Please choose a valid maintenance status." });
-      return;
-    }
-
-    const existingMaintenance = await queryOne(
-      "SELECT Request_id AS request_id FROM Maintenance WHERE Request_id = @requestId",
-      (request) => request.input("requestId", sql.Int, requestId)
-    );
-
-    if (!existingMaintenance) {
-      res.status(404).json({ message: "Maintenance request not found." });
-      return;
-    }
-
-    const room = await queryOne(
-      "SELECT Room_id AS room_id FROM Room WHERE Room_id = @roomId",
-      (request) => request.input("roomId", sql.Int, roomId)
-    );
-
-    if (!room) {
-      res.status(400).json({ message: "The selected room does not exist." });
-      return;
-    }
-
-    await executeQuery(
-      `
-        UPDATE Maintenance
-        SET Room_id = @roomId,
-            Issue_type = @issueType,
-            Date_Reported = @dateReported,
-            Status = @status
-        WHERE Request_id = @requestId
-      `,
-      (request) =>
-        request
-          .input("requestId", sql.Int, requestId)
-          .input("roomId", sql.Int, roomId)
-          .input("issueType", sql.NVarChar(100), issueType)
-          .input("dateReported", sql.Date, dateReported)
-          .input("status", sql.NVarChar(20), status)
-    );
-
-    const maintenance = await getMaintenanceById(requestId);
-    res.json(maintenance);
-  })
-);
-
-protectedRouter.delete(
-  "/maintenance/:id",
-  asyncHandler(async (req, res) => {
-    const requestId = parsePositiveInt(req.params.id);
-
-    if (!requestId) {
-      res.status(400).json({ message: "A valid request ID is required." });
-      return;
-    }
-
-    const existingMaintenance = await queryOne(
-      "SELECT Request_id AS request_id FROM Maintenance WHERE Request_id = @requestId",
-      (request) => request.input("requestId", sql.Int, requestId)
-    );
-
-    if (!existingMaintenance) {
-      res.status(404).json({ message: "Maintenance request not found." });
-      return;
-    }
-
-    await executeQuery(
-      "DELETE FROM Maintenance WHERE Request_id = @requestId",
-      (request) => request.input("requestId", sql.Int, requestId)
-    );
-
-    res.json({ message: "Maintenance request deleted successfully." });
-  })
-);
-
-protectedRouter.get(
-  "/leaves",
-  asyncHandler(async (req, res) => {
-    const rows = await queryRows(`${leaveSelectQuery} ORDER BY l.from_date DESC, l.leave_id DESC`);
-
-    res.json(rows);
-  })
-);
-
-protectedRouter.post(
-  "/leaves",
-  asyncHandler(async (req, res) => {
-    const studentId = parsePositiveInt(req.body.student_id);
-    const fromDate = parseDateValue(req.body.from_date);
-    const toDate = parseDateValue(req.body.to_date);
-    const reason = normalizeString(req.body.reason);
-    const status = normalizeString(req.body.status);
-
-    if (!studentId) {
-      res.status(400).json({ message: "Please choose a valid student." });
-      return;
-    }
-
-    if (!fromDate) {
-      res.status(400).json({ message: "From date is required." });
-      return;
-    }
-
-    if (!toDate) {
-      res.status(400).json({ message: "To date is required." });
-      return;
-    }
-
-    if (toDate.getTime() < fromDate.getTime()) {
-      res.status(400).json({ message: "To date cannot be earlier than from date." });
-      return;
-    }
-
-    if (!reason) {
-      res.status(400).json({ message: "Reason is required." });
-      return;
-    }
-
-    if (!isAllowedValue(status, LEAVE_STATUSES)) {
-      res.status(400).json({ message: "Please choose a valid leave status." });
-      return;
-    }
-
-    const student = await queryOne(
-      `SELECT Student_id AS student_id FROM ${STUDENT_TABLE} WHERE Student_id = @studentId`,
-      (request) => request.input("studentId", sql.Int, studentId)
-    );
-
-    if (!student) {
-      res.status(400).json({ message: "The selected student does not exist." });
-      return;
-    }
-
-    const leaveId = await getNextId("Leave_Request", "leave_id");
-
-    await executeQuery(
-      `
-        INSERT INTO Leave_Request (leave_id, student_id, from_date, to_date, reason, Status)
-        VALUES (@leaveId, @studentId, @fromDate, @toDate, @reason, @status)
-      `,
-      (request) =>
-        request
-          .input("leaveId", sql.Int, leaveId)
-          .input("studentId", sql.Int, studentId)
-          .input("fromDate", sql.Date, fromDate)
-          .input("toDate", sql.Date, toDate)
-          .input("reason", sql.NVarChar(255), reason)
-          .input("status", sql.NVarChar(20), status)
-    );
-
-    const leaveRequest = await getLeaveById(leaveId);
-    res.status(201).json(leaveRequest);
-  })
-);
-
-protectedRouter.put(
-  "/leaves/:id",
-  asyncHandler(async (req, res) => {
-    const leaveId = parsePositiveInt(req.params.id);
-    const studentId = parsePositiveInt(req.body.student_id);
-    const fromDate = parseDateValue(req.body.from_date);
-    const toDate = parseDateValue(req.body.to_date);
-    const reason = normalizeString(req.body.reason);
-    const status = normalizeString(req.body.status);
-
-    if (!leaveId) {
-      res.status(400).json({ message: "A valid leave ID is required." });
-      return;
-    }
-
-    if (!studentId) {
-      res.status(400).json({ message: "Please choose a valid student." });
-      return;
-    }
-
-    if (!fromDate) {
-      res.status(400).json({ message: "From date is required." });
-      return;
-    }
-
-    if (!toDate) {
-      res.status(400).json({ message: "To date is required." });
-      return;
-    }
-
-    if (toDate.getTime() < fromDate.getTime()) {
-      res.status(400).json({ message: "To date cannot be earlier than from date." });
-      return;
-    }
-
-    if (!reason) {
-      res.status(400).json({ message: "Reason is required." });
-      return;
-    }
-
-    if (!isAllowedValue(status, LEAVE_STATUSES)) {
-      res.status(400).json({ message: "Please choose a valid leave status." });
-      return;
-    }
-
-    const existingLeave = await queryOne(
-      "SELECT leave_id AS leave_id FROM Leave_Request WHERE leave_id = @leaveId",
-      (request) => request.input("leaveId", sql.Int, leaveId)
-    );
-
-    if (!existingLeave) {
-      res.status(404).json({ message: "Leave request not found." });
-      return;
-    }
-
-    const student = await queryOne(
-      `SELECT Student_id AS student_id FROM ${STUDENT_TABLE} WHERE Student_id = @studentId`,
-      (request) => request.input("studentId", sql.Int, studentId)
-    );
-
-    if (!student) {
-      res.status(400).json({ message: "The selected student does not exist." });
-      return;
-    }
-
-    await executeQuery(
-      `
-        UPDATE Leave_Request
-        SET student_id = @studentId,
-            from_date = @fromDate,
-            to_date = @toDate,
-            reason = @reason,
-            Status = @status
-        WHERE leave_id = @leaveId
-      `,
-      (request) =>
-        request
-          .input("leaveId", sql.Int, leaveId)
-          .input("studentId", sql.Int, studentId)
-          .input("fromDate", sql.Date, fromDate)
-          .input("toDate", sql.Date, toDate)
-          .input("reason", sql.NVarChar(255), reason)
-          .input("status", sql.NVarChar(20), status)
-    );
-
-    const leaveRequest = await getLeaveById(leaveId);
-    res.json(leaveRequest);
-  })
-);
-
-protectedRouter.delete(
-  "/leaves/:id",
-  asyncHandler(async (req, res) => {
-    const leaveId = parsePositiveInt(req.params.id);
-
-    if (!leaveId) {
-      res.status(400).json({ message: "A valid leave ID is required." });
-      return;
-    }
-
-    const existingLeave = await queryOne(
-      "SELECT leave_id AS leave_id FROM Leave_Request WHERE leave_id = @leaveId",
-      (request) => request.input("leaveId", sql.Int, leaveId)
-    );
-
-    if (!existingLeave) {
-      res.status(404).json({ message: "Leave request not found." });
-      return;
-    }
-
-    await executeQuery(
-      "DELETE FROM Leave_Request WHERE leave_id = @leaveId",
-      (request) => request.input("leaveId", sql.Int, leaveId)
-    );
-
-    res.json({ message: "Leave request deleted successfully." });
   })
 );
 
@@ -5033,6 +4537,7 @@ app.listen(PORT, () => {
 
   getPool()
     .then(() => ensureUserColumns())
+    .then(() => ensureFixedSuperAdminAccount())
     .then(() => ensureStudentsTable())
     .then(() => ensurePublicRoomShowcaseTable())
     .then(() => ensureDefaultRoomInventory())

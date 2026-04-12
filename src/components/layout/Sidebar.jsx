@@ -32,6 +32,18 @@ const adminNavItems = [
   { path: '/admin/leaves', label: 'Leave Requests', icon: CalendarDays },
 ]
 
+const superAdminHiddenPaths = new Set([
+  '/admin/fees',
+  '/admin/mess',
+  '/admin/maintenance',
+  '/admin/leaves',
+])
+
+const superAdminNavItems = [
+  ...adminNavItems.filter((item) => !superAdminHiddenPaths.has(item.path)),
+  { path: '/admin/admins', label: 'Admins', icon: ShieldCheck },
+]
+
 const studentNavItems = [
   { path: '/student', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { path: '/student/payment', label: 'Room Payment', icon: CreditCard },
@@ -44,7 +56,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const navItems = isStudent
     ? studentNavItems
     : user?.role === 'SuperAdmin'
-      ? [...adminNavItems, { path: '/admin/admins', label: 'Admins', icon: ShieldCheck }]
+      ? superAdminNavItems
       : adminNavItems
 
   return (

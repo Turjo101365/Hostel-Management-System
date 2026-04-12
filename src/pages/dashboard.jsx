@@ -38,6 +38,13 @@ const quickLinks = [
   { to: '/admin/leaves', label: 'Leaves', description: 'Watch leave approvals', icon: CalendarDays, tone: 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-950/30 dark:text-fuchsia-300' },
 ]
 
+const superAdminHiddenLinks = new Set([
+  '/admin/fees',
+  '/admin/mess',
+  '/admin/maintenance',
+  '/admin/leaves',
+])
+
 const metricTone = [
   'bg-sky-500',
   'bg-violet-500',
@@ -53,6 +60,7 @@ const getBookingBadgeVariant = (status) => {
 
 const Dashboard = () => {
   const { user } = useAuth()
+  const isSuperAdmin = user?.role === 'SuperAdmin'
   const [summary, setSummary] = useState(null)
   const [payments, setPayments] = useState([])
   const [maintenance, setMaintenance] = useState([])
@@ -65,10 +73,11 @@ const Dashboard = () => {
     setLoading(true)
 
     try {
+      const maintenancePromise = isSuperAdmin ? Promise.resolve([]) : maintenanceService.getAll()
       const [summaryData, paymentsData, maintenanceData, bookingRequestsData] = await Promise.all([
         dashboardService.getSummary(),
         paymentsService.getAll(),
-        maintenanceService.getAll(),
+        maintenancePromise,
         bookingRequestsService.getAll({ status: 'Pending' }),
       ])
 
@@ -76,9 +85,11 @@ const Dashboard = () => {
       setPayments(paymentsData.slice(0, 5))
       setBookingRequests(bookingRequestsData.slice(0, 4))
       setMaintenance(
-        maintenanceData
-          .filter((item) => item.status === 'Pending')
-          .slice(0, 4)
+        isSuperAdmin
+          ? []
+          : maintenanceData
+              .filter((item) => item.status === 'Pending')
+              .slice(0, 4)
       )
     } catch (error) {
       const message = error.response?.data?.message || 'Failed to load dashboard data.'
@@ -90,7 +101,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadDashboard()
-  }, [])
+  }, [isSuperAdmin])
 
   const handleInviteSubmit = async (event) => {
     event.preventDefault()
@@ -136,13 +147,17 @@ const Dashboard = () => {
     { label: 'Rooms', value: summary?.totalRooms || 0, note: 'Available to manage', to: '/admin/rooms' },
     { label: 'Occupied', value: summary?.occupiedRooms || 0, note: 'Currently filled rooms', to: '/admin/rooms' },
     { label: 'Pending', value: summary?.pendingMaintenance || 0, note: 'Maintenance requests', to: '/admin/maintenance' },
-  ]
+  ].filter((metric) => !isSuperAdmin || metric.to !== '/admin/maintenance')
 
   const chartData = {
     available: summary?.availableRooms || 0,
     occupied: summary?.occupiedRooms || 0,
     maintenance: summary?.pendingMaintenance || 0,
   }
+
+  const visibleQuickLinks = quickLinks.filter(
+    (item) => !isSuperAdmin || !superAdminHiddenLinks.has(item.to)
+  )
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -198,9 +213,16 @@ const Dashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1.1fr,0.9fr] gap-6">
-        <Card title="Room Occupancy" subtitle="Available rooms, occupied rooms, and pending maintenance">
-          <StatsChart data={chartData} />
-          <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+        <Card
+          title="Room Occupancy"
+          subtitle={
+            isSuperAdmin
+              ? 'Available rooms and occupied rooms across the hostel'
+              : 'Available rooms, occupied rooms, and pending maintenance'
+          }
+        >
+          <StatsChart data={chartData} includeMaintenance={!isSuperAdmin} />
+          <div className={`mt-4 grid gap-3 text-center ${isSuperAdmin ? 'grid-cols-2' : 'grid-cols-3'}`}>
             <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 p-3">
               <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Available</p>
               <p className="mt-2 text-2xl font-bold text-emerald-900 dark:text-emerald-100">{summary?.availableRooms || 0}</p>
@@ -209,10 +231,12 @@ const Dashboard = () => {
               <p className="text-xs uppercase tracking-wide text-rose-700 dark:text-rose-300">Occupied</p>
               <p className="mt-2 text-2xl font-bold text-rose-900 dark:text-rose-100">{summary?.occupiedRooms || 0}</p>
             </div>
-            <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/30 p-3">
-              <p className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300">Pending</p>
-              <p className="mt-2 text-2xl font-bold text-amber-900 dark:text-amber-100">{summary?.pendingMaintenance || 0}</p>
-            </div>
+            {!isSuperAdmin && (
+              <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/30 p-3">
+                <p className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300">Pending</p>
+                <p className="mt-2 text-2xl font-bold text-amber-900 dark:text-amber-100">{summary?.pendingMaintenance || 0}</p>
+              </div>
+            )}
           </div>
         </Card>
 
@@ -247,7 +271,7 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-[1.15fr,0.85fr] gap-6">
         <Card title="Admin Navigation" subtitle="Jump directly into the rest of the dashboard pages">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {quickLinks.map((item) => (
+            {visibleQuickLinks.map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
@@ -297,28 +321,30 @@ const Dashboard = () => {
             </div>
           </Card>
 
-          <Card
-            title="Pending Maintenance"
-            subtitle="Rooms needing attention first"
-            action={<Link to="/admin/maintenance" className="text-sm text-primary dark:text-blue-400 hover:underline">Open tracker</Link>}
-          >
-            <div className="space-y-3">
-              {maintenance.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">No pending issues at the moment.</p>
-              ) : (
-                maintenance.map((request) => (
-                  <div key={request.request_id} className="rounded-2xl bg-gray-50 dark:bg-slate-700/50 p-4">
-                    <div className="flex items-center justify-between">
-                      <p className="font-semibold text-gray-900 dark:text-white">Room {request.room_number}</p>
-                      <Badge variant="warning">{request.status}</Badge>
+          {!isSuperAdmin && (
+            <Card
+              title="Pending Maintenance"
+              subtitle="Rooms needing attention first"
+              action={<Link to="/admin/maintenance" className="text-sm text-primary dark:text-blue-400 hover:underline">Open tracker</Link>}
+            >
+              <div className="space-y-3">
+                {maintenance.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No pending issues at the moment.</p>
+                ) : (
+                  maintenance.map((request) => (
+                    <div key={request.request_id} className="rounded-2xl bg-gray-50 dark:bg-slate-700/50 p-4">
+                      <div className="flex items-center justify-between">
+                        <p className="font-semibold text-gray-900 dark:text-white">Room {request.room_number}</p>
+                        <Badge variant="warning">{request.status}</Badge>
+                      </div>
+                      <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{request.issue_type}</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDate(request.date_reported)}</p>
                     </div>
-                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{request.issue_type}</p>
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDate(request.date_reported)}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
+                  ))
+                )}
+              </div>
+            </Card>
+          )}
         </div>
       </div>
 

@@ -2,11 +2,11 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recha
 
 const COLORS = ['#10B981', '#EF4444', '#F59E0B']
 
-const StatsChart = ({ data }) => {
+const StatsChart = ({ data, includeMaintenance = true }) => {
   const chartData = [
     { name: 'Available', value: data.available },
     { name: 'Occupied', value: data.occupied },
-    { name: 'Maintenance', value: data.maintenance || 0 },
+    ...(includeMaintenance ? [{ name: 'Maintenance', value: data.maintenance || 0 }] : []),
   ]
 
   return (
@@ -40,4 +40,3 @@ const StatsChart = ({ data }) => {
 }
 
 export default StatsChart
-

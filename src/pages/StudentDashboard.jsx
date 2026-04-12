@@ -82,8 +82,11 @@ const StudentDashboard = () => {
   const summary = dashboard?.summary || {}
   const recentPayments = dashboard?.recentPayments || []
   const recentLeaveRequests = dashboard?.recentLeaveRequests || []
+  const roommateProfiles = dashboard?.roommateProfiles || []
+  const bookings = dashboard?.bookings || []
   const recentRoomBookings = dashboard?.recentRoomBookings || []
   const hasAssignedRoom = Boolean(profile.room_id)
+  const pendingBookingCount = recentRoomBookings.filter((booking) => booking.status === 'Pending').length
 
   const summaryCards = [
     { label: 'Payment Records', value: summary.paymentRecords || 0, note: 'Saved against your account', icon: CreditCard },
@@ -91,8 +94,10 @@ const StudentDashboard = () => {
     { label: 'Pending Leaves', value: summary.pendingLeaves || 0, note: 'Waiting for approval', icon: CalendarDays },
     {
       label: 'Booking Requests',
-      value: summary.bookingRequests || 0,
-      note: summary.pendingBookings ? `${summary.pendingBookings} pending admin review` : 'Track your room booking requests',
+      value: summary.bookingRequests || recentRoomBookings.length,
+      note: (summary.pendingBookings || pendingBookingCount)
+        ? `${summary.pendingBookings || pendingBookingCount} pending admin review`
+        : 'Track your room booking requests',
       icon: ClipboardList,
     },
   ]

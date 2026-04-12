@@ -96,7 +96,10 @@ const AppContent = () => {
           <Route path="fees" element={<FeeStructure />} />
           <Route path="mess" element={<MessMenu />} />
           <Route path="maintenance" element={<Maintenance />} />
-          <Route path="leaves" element={<LeaveRequests />} />
+          <Route
+            path="leaves"
+            element={user?.role === 'SuperAdmin' ? <Navigate to="/admin" replace /> : <LeaveRequests />}
+          />
           <Route path="admins" element={<Admins />} />
           <Route path="profile" element={<ProfileSettings />} />
         </Route>
@@ -110,7 +113,10 @@ const AppContent = () => {
         <Route path="/fees" element={<Navigate to="/admin/fees" replace />} />
         <Route path="/mess" element={<Navigate to="/admin/mess" replace />} />
         <Route path="/maintenance" element={<Navigate to="/admin/maintenance" replace />} />
-        <Route path="/leaves" element={<Navigate to="/admin/leaves" replace />} />
+        <Route
+          path="/leaves"
+          element={<Navigate to={user?.role === 'SuperAdmin' ? '/admin' : '/admin/leaves'} replace />}
+        />
         <Route path="/profile" element={<Navigate to="/admin/profile" replace />} />
       </Route>
 

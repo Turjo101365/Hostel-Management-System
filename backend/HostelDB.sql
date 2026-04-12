@@ -14,8 +14,6 @@ GO
 
 -- ------------------ RESET EXISTING TABLES ------------------
 -- Drop child tables first, then parent tables.
-IF OBJECT_ID('dbo.Leave_Request', 'U') IS NOT NULL DROP TABLE dbo.Leave_Request;
-IF OBJECT_ID('dbo.Maintenance', 'U') IS NOT NULL DROP TABLE dbo.Maintenance;
 IF OBJECT_ID('dbo.Payment', 'U') IS NOT NULL DROP TABLE dbo.Payment;
 IF OBJECT_ID('dbo.Visitor', 'U') IS NOT NULL DROP TABLE dbo.Visitor;
 IF OBJECT_ID('dbo.Students', 'U') IS NOT NULL DROP TABLE dbo.Students;
@@ -24,7 +22,6 @@ IF OBJECT_ID('dbo.Room_Booking_Request', 'U') IS NOT NULL DROP TABLE dbo.Room_Bo
 IF OBJECT_ID('dbo.Public_Room_Showcase', 'U') IS NOT NULL DROP TABLE dbo.Public_Room_Showcase;
 IF OBJECT_ID('dbo.Room', 'U') IS NOT NULL DROP TABLE dbo.Room;
 IF OBJECT_ID('dbo.Hostel_Block', 'U') IS NOT NULL DROP TABLE dbo.Hostel_Block;
-IF OBJECT_ID('dbo.Fee_Structure', 'U') IS NOT NULL DROP TABLE dbo.Fee_Structure;
 IF OBJECT_ID('dbo.Mess_Menu', 'U') IS NOT NULL DROP TABLE dbo.Mess_Menu;
 IF OBJECT_ID('dbo.AdminInvitations', 'U') IS NOT NULL DROP TABLE dbo.AdminInvitations;
 IF OBJECT_ID('dbo.Users', 'U') IS NOT NULL DROP TABLE dbo.Users;
@@ -70,7 +67,7 @@ VALUES (
     'feroz.alam4103@gmail.com',
     'Super Admin',
     'SuperAdmin',
-    '$2b$10$BMj2WlbGqsYJvOL7LqGlGe7FhR72qhjUQCcjXvVXfox0wbP.JX40i'
+    '$2b$10$c9e7.XiRARrD06b6EO4/UeQ3evi71IL2RscUXmzadNkR3ltYbNY0e'
 );
 GO
 
@@ -182,16 +179,6 @@ CREATE TABLE dbo.Payment (
 );
 GO
 
--- ------------------ FEE STRUCTURE ------------------
-CREATE TABLE dbo.Fee_Structure (
-    Fee_id INT NOT NULL,
-    Type NVARCHAR(50) NOT NULL,
-    Amount INT NOT NULL,
-    CONSTRAINT PK_Fee_Structure PRIMARY KEY (Fee_id),
-    CONSTRAINT CK_Fee_Structure_Amount CHECK (Amount > 0)
-);
-GO
-
 -- ------------------ MESS MENU ------------------
 CREATE TABLE dbo.Mess_Menu (
     Menu_Id INT NOT NULL,
@@ -205,41 +192,11 @@ CREATE TABLE dbo.Mess_Menu (
 );
 GO
 
--- ------------------ MAINTENANCE ------------------
-CREATE TABLE dbo.Maintenance (
-    Request_id INT NOT NULL,
-    Room_id INT NOT NULL,
-    Issue_type NVARCHAR(100) NOT NULL,
-    Date_Reported DATE NOT NULL,
-    Status NVARCHAR(20) NOT NULL,
-    CONSTRAINT PK_Maintenance PRIMARY KEY (Request_id),
-    CONSTRAINT CK_Maintenance_Status CHECK (Status IN ('Pending', 'In Progress', 'Completed')),
-    CONSTRAINT FK_Maintenance_Room FOREIGN KEY (Room_id) REFERENCES dbo.Room(Room_id)
-);
-GO
-
--- ------------------ LEAVE REQUEST ------------------
-CREATE TABLE dbo.Leave_Request (
-    leave_id INT NOT NULL,
-    student_id INT NOT NULL,
-    from_date DATE NOT NULL,
-    to_date DATE NOT NULL,
-    reason NVARCHAR(255) NOT NULL,
-    Status NVARCHAR(20) NOT NULL,
-    CONSTRAINT PK_Leave_Request PRIMARY KEY (leave_id),
-    CONSTRAINT CK_Leave_Request_Date_Range CHECK (to_date >= from_date),
-    CONSTRAINT CK_Leave_Request_Status CHECK (Status IN ('Pending', 'Approved', 'Rejected')),
-    CONSTRAINT FK_Leave_Request_Student FOREIGN KEY (student_id) REFERENCES dbo.Students(Student_id)
-);
-GO
-
 -- ------------------ SUPPORTING INDEXES ------------------
 CREATE INDEX IX_Room_Hostel_Block ON dbo.Room (Hostel_Block);
 CREATE INDEX IX_Students_Room_id ON dbo.Students (Room_id);
 CREATE INDEX IX_Visitor_Student_id ON dbo.Visitor (Student_id);
 CREATE INDEX IX_Payment_Student_id ON dbo.Payment (Student_id);
-CREATE INDEX IX_Maintenance_Room_id ON dbo.Maintenance (Room_id);
-CREATE INDEX IX_Leave_Request_student_id ON dbo.Leave_Request (student_id);
 CREATE INDEX IX_Public_Room_Showcase_Category_Sort ON dbo.Public_Room_Showcase (Category, Sort_Order);
 CREATE INDEX IX_Room_Booking_Request_User_Status ON dbo.Room_Booking_Request (User_id, Status);
 GO
