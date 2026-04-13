@@ -7,6 +7,7 @@ import {
   ClipboardList,
   CreditCard,
   UserCircle2,
+  CheckCircle2,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Badge from '../components/common/Badge'
@@ -27,6 +28,28 @@ const getBookingBadgeVariant = (status) => {
   return 'warning'
 }
 
+const getPaymentBadgeVariant = (status) => {
+  if (status === 'Approved' || status === 'Verified') return 'success'
+  if (status === 'Rejected') return 'danger'
+  return 'warning'
+}
+
+const getPaymentStatusLabel = (status) => {
+  if (status === 'Approved' || status === 'Verified') return 'Approved'
+  return status || 'Pending'
+}
+
+// Determine combined status: both payment AND booking must be approved
+const getCombinedRequestStatus = (bookingStatus, paymentStatus) => {
+  if (bookingStatus === 'Rejected' || paymentStatus === 'Rejected') {
+    return 'rejected'
+  }
+  if (bookingStatus === 'Approved' && (paymentStatus === 'Approved' || paymentStatus === 'Verified')) {
+    return 'fully_approved'
+  }
+  return 'pending'
+}
+
 const StudentDashboard = () => {
   const [dashboard, setDashboard] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -41,6 +64,21 @@ const StudentDashboard = () => {
         const data = await studentPortalService.getDashboard()
         if (active) {
           setDashboard(data)
+          const workflowNotifications = Array.isArray(data?.workflowNotifications)
+            ? data.workflowNotifications
+            : []
+
+          if (workflowNotifications.length > 0) {
+            const latest = workflowNotifications[0]
+            const notificationCount = Number(data?.summary?.completedApprovals || workflowNotifications.length)
+
+            toast.success(
+              notificationCount > 1
+                ? `Great news! ${notificationCount} of your room bookings are fully approved.`
+                : `Great news! Your ${latest?.title || 'room'} booking is fully approved.`,
+              { duration: 5000 }
+            )
+          }
         }
       } catch (error) {
         if (active) {
@@ -81,20 +119,33 @@ const StudentDashboard = () => {
   const profile = dashboard?.profile || {}
   const summary = dashboard?.summary || {}
   const recentPayments = dashboard?.recentPayments || []
+  const recentLeaveRequests = dashboard?.recentLeaveRequests || []
   const roommateProfiles = dashboard?.roommateProfiles || []
   const bookings = dashboard?.bookings || []
   const recentRoomBookings = dashboard?.recentRoomBookings || []
   const hasAssignedRoom = Boolean(profile.room_id)
-  const pendingBookingCount = recentRoomBookings.filter((booking) => booking.status === 'Pending').length
+  const pendingBookingCount = recentRoomBookings.filter(
+    (booking) => (booking.booking_status || booking.status) === 'Pending'
+  ).length
+  const pendingPaymentCount = summary.pendingPaymentVerifications
+    || recentRoomBookings.filter((booking) => booking.payment_status === 'Pending').length
+
+  // Find requests where both booking and payment are approved.
+  const approvedBookingsWithApprovedPayments = recentRoomBookings.filter(
+    (booking) =>
+      (booking.booking_status || booking.status) === 'Approved'
+      && (booking.payment_status === 'Approved' || booking.payment_status === 'Verified')
+  )
 
   const summaryCards = [
     { label: 'Payment Records', value: summary.paymentRecords || 0, note: 'Saved against your account', icon: CreditCard },
     { label: 'Total Paid', value: formatCurrency(summary.totalPaid), note: 'Collected hostel payments', icon: BadgeCheck },
+    { label: 'Pending Leaves', value: summary.pendingLeaves || 0, note: 'Waiting for approval', icon: CalendarDays },
     {
       label: 'Booking Requests',
       value: summary.bookingRequests || recentRoomBookings.length,
       note: (summary.pendingBookings || pendingBookingCount)
-        ? `${summary.pendingBookings || pendingBookingCount} pending admin review`
+        ? `${summary.pendingBookings || pendingBookingCount} booking + ${pendingPaymentCount} payment pending`
         : 'Track your room booking requests',
       icon: ClipboardList,
     },
@@ -118,7 +169,7 @@ const StudentDashboard = () => {
             <div className="flex flex-wrap gap-3">
               <Badge className="border border-white/10 bg-white/15 text-white">
                 {hasAssignedRoom
-                  ? `Room ${profile.room_number} • ${profile.block_name || 'Block pending'}`
+                  ? `Room ${profile.room_number} - ${profile.block_name || 'Block pending'}`
                   : 'Room assignment pending'}
               </Badge>
               <Badge className="border border-white/10 bg-white/15 text-white">
@@ -134,6 +185,27 @@ const StudentDashboard = () => {
           </div>
         </div>
       </section>
+
+      {approvedBookingsWithApprovedPayments.length > 0 && (
+        <div className="rounded-2xl border-l-4 border-emerald-500 bg-emerald-50 p-4 dark:border-emerald-600 dark:bg-emerald-950/30">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <div>
+              <h3 className="font-semibold text-emerald-900 dark:text-emerald-100">
+                Room Booking Approved!
+              </h3>
+              <p className="mt-1 text-sm text-emerald-800 dark:text-emerald-200">
+                Your booking request and payment have both been approved by an admin.
+              </p>
+              {approvedBookingsWithApprovedPayments.map((booking) => (
+                <p key={booking.booking_id} className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
+                  - {booking.room_name || 'Room'} - {booking.room_category || 'Category unknown'}
+                </p>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {summaryCards.map((card, index) => (
@@ -179,7 +251,7 @@ const StudentDashboard = () => {
               <p className="text-xs uppercase tracking-wide text-violet-700 dark:text-violet-300">Room Status</p>
               <p className="mt-2 text-sm font-semibold text-violet-950 dark:text-violet-100">
                 {hasAssignedRoom
-                  ? `Room ${profile.room_number} • ${profile.block_name || 'Block pending'}`
+                  ? `Room ${profile.room_number} - ${profile.block_name || 'Block pending'}`
                   : 'Pending room assignment'}
               </p>
             </div>
@@ -197,7 +269,7 @@ const StudentDashboard = () => {
                   <div>
                     <p className="font-semibold text-gray-900 dark:text-white">Room {profile.room_number}</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {profile.block_name || 'Block pending'} • {profile.room_type || 'Type pending'}
+                      {profile.block_name || 'Block pending'} - {profile.room_type || 'Type pending'}
                     </p>
                   </div>
                 </div>
@@ -268,7 +340,7 @@ const StudentDashboard = () => {
                   <div>
                     <p className="text-sm font-semibold text-gray-900 dark:text-white">{booking.requested_room_name || 'Booked room'}</p>
                     <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      Allocated Room {booking.allocated_room_number || 'Pending'} • {booking.allocated_block_name || 'Block pending'}
+                      Allocated Room {booking.allocated_room_number || 'Pending'} - {booking.allocated_block_name || 'Block pending'}
                     </p>
                   </div>
                   <Badge variant={getBookingBadgeVariant(booking.status)}>
@@ -307,17 +379,40 @@ const StudentDashboard = () => {
             recentRoomBookings.map((booking) => (
               <div key={booking.booking_id} className="rounded-2xl bg-gray-50 p-4 dark:bg-slate-700/50">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-white">{booking.room_title}</p>
+                  <div className="flex-1">
+                    <p className="font-semibold text-gray-900 dark:text-white">{booking.room_name || booking.room_title}</p>
                     <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                       {booking.room_category} room
-                      {booking.price_range ? ` • ${booking.price_range}` : ''}
+                      {booking.amount ? ` - ${formatCurrency(booking.amount)}` : ''}
                     </p>
                     <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      Requested on {formatDateTime(booking.requested_at)}
+                      Requested on {formatDateTime(booking.requested_at || booking.booked_at)}
                     </p>
+                    {/* Show payment and booking status */}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <div>
+                        <p className="text-xs text-gray-600 dark:text-gray-400">Booking:</p>
+                        <Badge variant={getBookingBadgeVariant(booking.booking_status)}>
+                          {booking.booking_status || 'Pending'}
+                        </Badge>
+                      </div>
+                      {booking.payment_status && (
+                        <div>
+                          <p className="text-xs text-gray-600 dark:text-gray-400">Payment:</p>
+                          <Badge variant={getPaymentBadgeVariant(booking.payment_status)}>
+                            {getPaymentStatusLabel(booking.payment_status)}
+                          </Badge>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <Badge variant={getBookingBadgeVariant(booking.status)}>{booking.status}</Badge>
+                  {/* Combined status indicator */}
+                  {getCombinedRequestStatus(booking.booking_status, booking.payment_status) === 'fully_approved' && (
+                    <div className="flex items-center gap-2 rounded-lg bg-emerald-100 px-3 py-2 dark:bg-emerald-900/40">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                      <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Approved</span>
+                    </div>
+                  )}
                 </div>
               </div>
             ))
@@ -341,8 +436,32 @@ const StudentDashboard = () => {
                   </div>
                   <div className="text-right">
                     <p className="font-bold text-gray-900 dark:text-white">{formatCurrency(payment.amount)}</p>
-                    <Badge variant="success" className="mt-2">{payment.status}</Badge>
+                    <Badge variant={getPaymentBadgeVariant(payment.status)} className="mt-2">
+                      {getPaymentStatusLabel(payment.status)}
+                    </Badge>
                   </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+
+        <Card title="Leave Requests" subtitle="Your latest leave activity">
+          <div className="space-y-3">
+            {recentLeaveRequests.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">No leave requests have been recorded yet.</p>
+            ) : (
+              recentLeaveRequests.map((leave) => (
+                <div key={leave.leave_id} className="rounded-2xl bg-gray-50 p-4 dark:bg-slate-700/50">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-gray-900 dark:text-white">
+                      {formatDate(leave.from_date)} to {formatDate(leave.to_date)}
+                    </p>
+                    <Badge variant={leave.status === 'Approved' ? 'success' : leave.status === 'Rejected' ? 'danger' : 'warning'}>
+                      {leave.status}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{leave.reason}</p>
                 </div>
               ))
             )}
@@ -354,3 +473,4 @@ const StudentDashboard = () => {
 }
 
 export default StudentDashboard
+

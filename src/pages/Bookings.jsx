@@ -6,13 +6,13 @@ import Button from '../components/common/Button'
 import Card from '../components/common/Card'
 import Table from '../components/common/Table'
 import { bookingRequestsService } from '../services/adminService'
-import { formatCurrency, formatDateTime } from '../utils/helpers'
+import { formatDateTime } from '../utils/helpers'
 
 const toneClasses = {
   blue: 'bg-sky-50 text-sky-900 border-sky-100 dark:bg-sky-950/30 dark:text-sky-100 dark:border-sky-900/40',
   amber: 'bg-amber-50 text-amber-900 border-amber-100 dark:bg-amber-950/30 dark:text-amber-100 dark:border-amber-900/40',
   emerald: 'bg-emerald-50 text-emerald-900 border-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-100 dark:border-emerald-900/40',
-  violet: 'bg-violet-50 text-violet-900 border-violet-100 dark:bg-violet-950/30 dark:text-violet-100 dark:border-violet-900/40',
+  rose: 'bg-rose-50 text-rose-900 border-rose-100 dark:bg-rose-950/30 dark:text-rose-100 dark:border-rose-900/40',
 }
 
 const getBookingBadgeVariant = (status) => {
@@ -25,11 +25,7 @@ const summaryItems = (rows) => [
   { label: 'Total Requests', value: rows.length, tone: 'blue' },
   { label: 'Pending', value: rows.filter((row) => row.status === 'Pending').length, tone: 'amber' },
   { label: 'Approved', value: rows.filter((row) => row.status === 'Approved').length, tone: 'emerald' },
-  {
-    label: 'Payment Total',
-    value: formatCurrency(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)),
-    tone: 'violet',
-  },
+  { label: 'Rejected', value: rows.filter((row) => row.status === 'Rejected').length, tone: 'rose' },
 ]
 
 const Bookings = () => {
@@ -107,19 +103,6 @@ const Bookings = () => {
       ),
     },
     {
-      header: 'Payment',
-      key: 'amount',
-      sortable: true,
-      render: (row) => (
-        <div>
-          <p className="font-semibold">{formatCurrency(row.amount)}</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            {row.card_brand || 'Card'} {row.card_last4 ? `ending ${row.card_last4}` : ''}
-          </p>
-        </div>
-      ),
-    },
-    {
       header: 'Requested At',
       key: 'requested_at',
       sortable: true,
@@ -158,7 +141,7 @@ const Bookings = () => {
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Booking Transactions</h2>
           <p className="mt-1 text-gray-500 dark:text-gray-400">
-            Review student room requests, payment details, and approve pending allocations.
+            Review room booking requests here. Payment approvals are handled in the Payments page.
           </p>
         </div>
 
@@ -197,7 +180,7 @@ const Bookings = () => {
         data={rows}
         loading={loading}
         emptyMessage="No booking transactions have been recorded yet."
-        searchPlaceholder="Search bookings by student, room, email, payment, or status..."
+        searchPlaceholder="Search bookings by student, room, email, or status..."
       />
     </div>
   )

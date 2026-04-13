@@ -387,6 +387,31 @@ const ensurePublicRoomShowcaseTable = async () => {
       ON dbo.Public_Room_Showcase (Category, Sort_Order);
     END;
 
+    IF OBJECT_ID('dbo.Payment', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.Payment (
+        Payment_id INT NOT NULL,
+        Student_id INT NOT NULL,
+        Amount INT NOT NULL,
+        Payment_Date DATE NOT NULL,
+        [Month] NVARCHAR(20) NOT NULL,
+        PaymentStatus NVARCHAR(20) NOT NULL
+          CONSTRAINT DF_Payment_PaymentStatus DEFAULT 'Pending',
+        VerifiedBy INT NULL,
+        VerifiedAt DATETIME NULL,
+        Verification_Status NVARCHAR(20) NOT NULL
+          CONSTRAINT DF_Payment_Verification_Status DEFAULT 'Pending',
+        Verified_By_Admin_Id INT NULL,
+        Verified_At DATETIME NULL,
+        Verification_Note NVARCHAR(250) NULL,
+        CONSTRAINT PK_Payment PRIMARY KEY (Payment_id),
+        CONSTRAINT CK_Payment_Amount CHECK (Amount > 0),
+        CONSTRAINT CK_Payment_Verification_Status CHECK (Verification_Status IN ('Pending', 'Approved', 'Rejected')),
+        CONSTRAINT FK_Payment_Student FOREIGN KEY (Student_id)
+          REFERENCES dbo.Students(Student_id)
+      );
+    END;
+
     IF OBJECT_ID('dbo.Student_Room_Booking', 'U') IS NULL
     BEGIN
       CREATE TABLE dbo.Student_Room_Booking (
@@ -462,6 +487,271 @@ const ensurePublicRoomShowcaseTable = async () => {
     BEGIN
       CREATE INDEX IX_Student_Room_Booking_Student
       ON dbo.Student_Room_Booking (Student_id, Booked_At DESC);
+    END;
+
+    IF COL_LENGTH('dbo.Payment', 'Verification_Status') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Payment ADD Verification_Status NVARCHAR(20) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Payment', 'Verified_By_Admin_Id') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Payment ADD Verified_By_Admin_Id INT NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Payment', 'Verified_At') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Payment ADD Verified_At DATETIME NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Payment', 'Verification_Note') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Payment ADD Verification_Note NVARCHAR(250) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Payment', 'PaymentStatus') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Payment ADD PaymentStatus NVARCHAR(20) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Payment', 'VerifiedBy') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Payment ADD VerifiedBy INT NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Payment', 'VerifiedAt') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Payment ADD VerifiedAt DATETIME NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Payment', 'Booking_Transaction_id') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Payment ADD Booking_Transaction_id INT NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Payment', 'Booking_Transaction_id') IS NOT NULL
+    BEGIN
+      EXEC sp_executesql N'
+        UPDATE p
+        SET Booking_Transaction_id = sb.Booking_Transaction_id
+        FROM dbo.Payment p
+        INNER JOIN dbo.Student_Room_Booking sb ON sb.Payment_id = p.Payment_id
+        WHERE p.Booking_Transaction_id IS NULL;
+      ';
+
+      EXEC sp_executesql N'
+        UPDATE sb
+        SET Payment_id = p.Payment_id
+        FROM dbo.Student_Room_Booking sb
+        INNER JOIN dbo.Payment p ON p.Booking_Transaction_id = sb.Booking_Transaction_id
+        WHERE sb.Payment_id IS NULL;
+      ';
+    END;
+
+    ;WITH PendingPaymentApprovedBooking AS (
+      SELECT
+        sb.Booking_Transaction_id,
+        sb.Student_id,
+        sb.Allocated_Room_id
+      FROM dbo.Student_Room_Booking sb
+      LEFT JOIN dbo.Payment p ON p.Payment_id = sb.Payment_id
+      WHERE sb.Status = 'Approved'
+        AND sb.Allocated_Room_id IS NOT NULL
+        AND COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') = 'Pending'
+    )
+    UPDATE sb
+    SET Status = 'Pending',
+        Allocated_Room_id = NULL
+    FROM dbo.Student_Room_Booking sb
+    INNER JOIN PendingPaymentApprovedBooking inconsistent
+      ON inconsistent.Booking_Transaction_id = sb.Booking_Transaction_id;
+
+    UPDATE s
+    SET Room_id = NULL
+    FROM dbo.Students s
+    WHERE s.Room_id IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM dbo.Student_Room_Booking sb
+        LEFT JOIN dbo.Payment p ON p.Payment_id = sb.Payment_id
+        WHERE sb.Student_id = s.Student_id
+          AND sb.Status = 'Pending'
+          AND sb.Allocated_Room_id = s.Room_id
+          AND COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') = 'Pending'
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM dbo.Student_Room_Booking sb
+        LEFT JOIN dbo.Payment p ON p.Payment_id = sb.Payment_id
+        WHERE sb.Student_id = s.Student_id
+          AND sb.Status = 'Approved'
+          AND sb.Allocated_Room_id = s.Room_id
+          AND COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') = 'Approved'
+      );
+
+    DECLARE @hasPaymentStatus BIT = CASE WHEN COL_LENGTH('dbo.Payment', 'PaymentStatus') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @hasVerificationStatus BIT = CASE WHEN COL_LENGTH('dbo.Payment', 'Verification_Status') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @hasVerifiedBy BIT = CASE WHEN COL_LENGTH('dbo.Payment', 'VerifiedBy') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @hasVerifiedByAdminId BIT = CASE WHEN COL_LENGTH('dbo.Payment', 'Verified_By_Admin_Id') IS NOT NULL THEN 1 ELSE 0 END;
+
+    IF @hasPaymentStatus = 1
+    BEGIN
+      DECLARE @paymentStatusSql NVARCHAR(MAX) = N'UPDATE p SET PaymentStatus = CASE ';
+
+      IF @hasPaymentStatus = 1
+        SET @paymentStatusSql += N'WHEN p.PaymentStatus IN (''Pending'', ''Approved'', ''Rejected'') THEN p.PaymentStatus ';
+
+      IF @hasPaymentStatus = 1
+        SET @paymentStatusSql += N'WHEN p.PaymentStatus = ''Verified'' THEN ''Approved'' ';
+
+      IF @hasVerificationStatus = 1
+        SET @paymentStatusSql += N'WHEN p.Verification_Status IN (''Pending'', ''Approved'', ''Rejected'') THEN p.Verification_Status ';
+
+      IF @hasVerificationStatus = 1
+        SET @paymentStatusSql += N'WHEN p.Verification_Status = ''Verified'' THEN ''Approved'' ';
+
+      SET @paymentStatusSql += N'WHEN EXISTS (
+            SELECT 1
+            FROM dbo.Student_Room_Booking sb
+            WHERE sb.Payment_id = p.Payment_id
+              AND sb.Status = ''Rejected''
+          ) THEN ''Rejected'' ';
+      SET @paymentStatusSql += N'WHEN EXISTS (
+            SELECT 1
+            FROM dbo.Student_Room_Booking sb
+            WHERE sb.Payment_id = p.Payment_id
+              AND sb.Status = ''Approved''
+          ) THEN ''Approved'' ';
+      SET @paymentStatusSql += N'ELSE ''Pending'' END FROM dbo.Payment p;';
+
+      EXEC sp_executesql @paymentStatusSql;
+      EXEC sp_executesql N'ALTER TABLE dbo.Payment ALTER COLUMN PaymentStatus NVARCHAR(20) NOT NULL;';
+    END;
+
+    IF @hasVerificationStatus = 1
+    BEGIN
+      DECLARE @verificationStatusSql NVARCHAR(MAX) = N'UPDATE p SET Verification_Status = CASE ';
+
+      IF @hasPaymentStatus = 1
+        SET @verificationStatusSql += N'WHEN p.PaymentStatus IN (''Pending'', ''Approved'', ''Rejected'') THEN p.PaymentStatus ';
+
+      IF @hasPaymentStatus = 1
+        SET @verificationStatusSql += N'WHEN p.PaymentStatus = ''Verified'' THEN ''Approved'' ';
+
+      IF @hasVerificationStatus = 1
+        SET @verificationStatusSql += N'WHEN p.Verification_Status IN (''Pending'', ''Approved'', ''Rejected'') THEN p.Verification_Status ';
+
+      IF @hasVerificationStatus = 1
+        SET @verificationStatusSql += N'WHEN p.Verification_Status = ''Verified'' THEN ''Approved'' ';
+
+      SET @verificationStatusSql += N'WHEN EXISTS (
+            SELECT 1
+            FROM dbo.Student_Room_Booking sb
+            WHERE sb.Payment_id = p.Payment_id
+              AND sb.Status = ''Rejected''
+          ) THEN ''Rejected'' ';
+      SET @verificationStatusSql += N'WHEN EXISTS (
+            SELECT 1
+            FROM dbo.Student_Room_Booking sb
+            WHERE sb.Payment_id = p.Payment_id
+              AND sb.Status = ''Approved''
+          ) THEN ''Approved'' ';
+      SET @verificationStatusSql += N'ELSE ''Pending'' END FROM dbo.Payment p;';
+
+      EXEC sp_executesql @verificationStatusSql;
+      EXEC sp_executesql N'ALTER TABLE dbo.Payment ALTER COLUMN Verification_Status NVARCHAR(20) NOT NULL;';
+    END;
+
+    IF @hasPaymentStatus = 1
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE name = 'CK_Payment_PaymentStatus'
+          AND parent_object_id = OBJECT_ID('dbo.Payment')
+      )
+      BEGIN
+        EXEC sp_executesql N'ALTER TABLE dbo.Payment ADD CONSTRAINT CK_Payment_PaymentStatus CHECK (PaymentStatus IN (''Pending'', ''Approved'', ''Rejected''));';
+      END;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.default_constraints
+        WHERE parent_object_id = OBJECT_ID('dbo.Payment')
+          AND name = 'DF_Payment_PaymentStatus'
+      )
+      BEGIN
+        EXEC sp_executesql N'ALTER TABLE dbo.Payment ADD CONSTRAINT DF_Payment_PaymentStatus DEFAULT ''Pending'' FOR PaymentStatus;';
+      END;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE object_id = OBJECT_ID('dbo.Payment')
+          AND name = 'IX_Payment_PaymentStatus'
+      )
+      BEGIN
+        EXEC sp_executesql N'CREATE INDEX IX_Payment_PaymentStatus ON dbo.Payment (PaymentStatus, Payment_Date DESC, Payment_id DESC);';
+      END;
+    END;
+
+    IF @hasVerificationStatus = 1
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE name = 'CK_Payment_Verification_Status'
+          AND parent_object_id = OBJECT_ID('dbo.Payment')
+      )
+      BEGIN
+        EXEC sp_executesql N'ALTER TABLE dbo.Payment ADD CONSTRAINT CK_Payment_Verification_Status CHECK (Verification_Status IN (''Pending'', ''Approved'', ''Rejected''));';
+      END;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.default_constraints
+        WHERE parent_object_id = OBJECT_ID('dbo.Payment')
+          AND name = 'DF_Payment_Verification_Status'
+      )
+      BEGIN
+        EXEC sp_executesql N'ALTER TABLE dbo.Payment ADD CONSTRAINT DF_Payment_Verification_Status DEFAULT ''Pending'' FOR Verification_Status;';
+      END;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE object_id = OBJECT_ID('dbo.Payment')
+          AND name = 'IX_Payment_Verification_Status'
+      )
+      BEGIN
+        EXEC sp_executesql N'CREATE INDEX IX_Payment_Verification_Status ON dbo.Payment (Verification_Status, Payment_Date DESC, Payment_id DESC);';
+      END;
+    END;
+
+    IF @hasVerifiedByAdminId = 1
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.foreign_keys
+        WHERE parent_object_id = OBJECT_ID('dbo.Payment')
+          AND name = 'FK_Payment_Verified_By_Admin'
+      )
+      BEGIN
+        EXEC sp_executesql N'ALTER TABLE dbo.Payment ADD CONSTRAINT FK_Payment_Verified_By_Admin FOREIGN KEY (Verified_By_Admin_Id) REFERENCES dbo.Users(id);';
+      END;
+    END;
+
+    IF @hasVerifiedBy = 1
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.foreign_keys
+        WHERE parent_object_id = OBJECT_ID('dbo.Payment')
+          AND name = 'FK_Payment_VerifiedBy'
+      )
+      BEGIN
+        EXEC sp_executesql N'ALTER TABLE dbo.Payment ADD CONSTRAINT FK_Payment_VerifiedBy FOREIGN KEY (VerifiedBy) REFERENCES dbo.Users(id);';
+      END;
     END;
   `);
 
@@ -707,7 +997,19 @@ const DAY_ORDER_CASE = `
 `;
 
 const MESS_MEAL_TYPES = ["Breakfast", "Lunch", "Dinner"];
-const BOOKING_REQUEST_STATUSES = ["Pending", "Approved", "Rejected"];
+const APPROVAL_STATUSES = ["Pending", "Approved", "Rejected"];
+const BOOKING_REQUEST_STATUSES = [...APPROVAL_STATUSES];
+const PAYMENT_VERIFICATION_STATUSES = [...APPROVAL_STATUSES];
+const normalizeApprovalStatus = (value) => {
+  const normalized = normalizeString(value).toLowerCase();
+  if (normalized === "approved" || normalized === "verified" || normalized === "accepted") {
+    return "Approved";
+  }
+  if (normalized === "rejected") {
+    return "Rejected";
+  }
+  return "Pending";
+};
 const PUBLIC_ROOM_CATEGORIES = ["single", "double", "triple", "shared"];
 const PUBLIC_ROOM_CATEGORY_LABELS = {
   single: "Single Room",
@@ -1187,10 +1489,12 @@ const studentRoomBookingSelectQuery = `
     sb.Booking_Transaction_id AS id,
     sb.Booking_Transaction_id AS booking_id,
     sb.Showcase_Room_id AS room_id,
+    prs.Room_Name AS room_name,
     prs.Room_Name AS room_title,
     prs.Category AS room_category,
     CONCAT('$', prs.Price_Min, ' - $', prs.Price_Max, ' ', prs.Price_Unit) AS price_range,
-    sb.Payment_id AS payment_id,
+    COALESCE(sb.Payment_id, p.Payment_id) AS payment_id,
+    COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') AS payment_status,
     sb.Amount AS amount,
     sb.Card_Brand AS card_brand,
     sb.Card_Last4 AS card_last4,
@@ -1198,7 +1502,21 @@ const studentRoomBookingSelectQuery = `
     r.Room_Number AS allocated_room_number,
     hb.Block_Name AS allocated_block_name,
     sb.Booked_At AS requested_at,
+    sb.Booked_At AS booked_at,
     sb.Status AS status,
+    sb.Status AS booking_status,
+    COALESCE(p.VerifiedAt, p.Verified_At) AS payment_verified_at,
+    COALESCE(p.VerifiedBy, p.Verified_By_Admin_Id) AS payment_verified_by_admin_id,
+    CASE
+      WHEN sb.Status = 'Approved'
+           AND COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') = 'Approved'
+        THEN 'Completed'
+      WHEN sb.Status = 'Rejected'
+           OR COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') = 'Rejected'
+        THEN 'Rejected'
+      WHEN sb.Status = 'Approved' THEN 'Awaiting Payment Verification'
+      ELSE 'Pending'
+    END AS workflow_status,
     s.Student_id AS student_id,
     s.Name AS student_name,
     s.Email AS student_email,
@@ -1208,6 +1526,23 @@ const studentRoomBookingSelectQuery = `
   INNER JOIN ${STUDENT_TABLE} s ON s.Student_id = sb.Student_id
   LEFT JOIN Room r ON r.Room_id = sb.Allocated_Room_id
   LEFT JOIN Hostel_Block hb ON hb.Block_id = r.Hostel_Block
+  OUTER APPLY (
+    SELECT TOP 1
+      p.Payment_id,
+      p.PaymentStatus,
+      p.Verification_Status,
+      p.VerifiedBy,
+      p.Verified_By_Admin_Id,
+      p.VerifiedAt,
+      p.Verified_At
+    FROM Payment p
+    WHERE p.Payment_id = sb.Payment_id
+      OR p.Booking_Transaction_id = sb.Booking_Transaction_id
+    ORDER BY
+      CASE WHEN p.Payment_id = sb.Payment_id THEN 0 ELSE 1 END,
+      p.Payment_Date DESC,
+      p.Payment_id DESC
+  ) p
 `;
 
 const blockSelectQuery = `
@@ -1223,14 +1558,52 @@ const paymentSelectQuery = `
   SELECT
     p.Payment_id AS id,
     p.Payment_id AS payment_id,
+    COALESCE(sb.Booking_Transaction_id, p.Booking_Transaction_id) AS booking_id,
     p.Student_id AS student_id,
     s.Name AS student_name,
+    s.Email AS student_email,
     p.Amount AS amount,
     p.Payment_Date AS payment_date,
     p.[Month] AS [month],
-    'Paid' AS status
+    LTRIM(RTRIM(COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending'))) AS payment_status,
+    LTRIM(RTRIM(COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending'))) AS status,
+    COALESCE(p.VerifiedBy, p.Verified_By_Admin_Id) AS verified_by_id,
+    ISNULL(u.fullName, u.email) AS verified_by_name,
+    u.Role AS verified_by_role,
+    CASE
+      WHEN u.Role = 'SuperAdmin' THEN 'Verified by super admin'
+      WHEN COALESCE(p.VerifiedBy, p.Verified_By_Admin_Id) IS NOT NULL THEN 'Verified by admin'
+      ELSE 'Pending verification'
+    END AS verification_label,
+    COALESCE(p.VerifiedAt, p.Verified_At) AS verified_at,
+    p.Verification_Note AS verification_note,
+    sb.Status AS booking_status,
+    sb.Booked_At AS booking_requested_at,
+    sb.Showcase_Room_id AS requested_room_id,
+    prs.Room_Name AS room_title,
+    prs.Category AS room_category,
+    sb.Card_Brand AS card_brand,
+    sb.Card_Last4 AS card_last4
   FROM Payment p
   LEFT JOIN ${STUDENT_TABLE} s ON s.Student_id = p.Student_id
+  OUTER APPLY (
+    SELECT TOP 1
+      sb.Booking_Transaction_id,
+      sb.Status,
+      sb.Booked_At,
+      sb.Showcase_Room_id,
+      sb.Card_Brand,
+      sb.Card_Last4
+    FROM Student_Room_Booking sb
+    WHERE sb.Payment_id = p.Payment_id
+      OR (p.Booking_Transaction_id IS NOT NULL AND sb.Booking_Transaction_id = p.Booking_Transaction_id)
+    ORDER BY
+      CASE WHEN sb.Payment_id = p.Payment_id THEN 0 ELSE 1 END,
+      sb.Booked_At DESC,
+      sb.Booking_Transaction_id DESC
+  ) sb
+  LEFT JOIN Public_Room_Showcase prs ON prs.Showcase_Room_id = sb.Showcase_Room_id
+  LEFT JOIN Users u ON u.id = COALESCE(p.VerifiedBy, p.Verified_By_Admin_Id)
 `;
 
 const messSelectQuery = `
@@ -1259,11 +1632,26 @@ const bookingSelectQuery = `
     r.Room_Number AS allocated_room_number,
     r.Type AS allocated_room_type,
     hb.Block_Name AS allocated_block_name,
-    sb.Payment_id AS payment_id,
+    COALESCE(sb.Payment_id, p.Payment_id) AS payment_id,
     sb.Amount AS amount,
     sb.Card_Brand AS card_brand,
     sb.Card_Last4 AS card_last4,
     sb.Status AS status,
+    LTRIM(RTRIM(COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending'))) AS payment_status,
+    COALESCE(p.VerifiedAt, p.Verified_At) AS payment_verified_at,
+    COALESCE(p.VerifiedBy, p.Verified_By_Admin_Id) AS payment_verified_by_admin_id,
+    ISNULL(u.fullName, u.email) AS payment_verified_by_name,
+    p.Verification_Note AS payment_verification_note,
+    CASE
+      WHEN sb.Status = 'Approved'
+           AND COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') = 'Approved'
+        THEN 'Completed'
+      WHEN sb.Status = 'Rejected'
+           OR COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') = 'Rejected'
+        THEN 'Rejected'
+      WHEN sb.Status = 'Approved' THEN 'Awaiting Payment Verification'
+      ELSE 'Pending'
+    END AS workflow_status,
     sb.Booked_At AS booked_at,
     p.Payment_Date AS payment_date,
     p.[Month] AS payment_month
@@ -1272,7 +1660,27 @@ const bookingSelectQuery = `
   LEFT JOIN Public_Room_Showcase prs ON prs.Showcase_Room_id = sb.Showcase_Room_id
   LEFT JOIN Room r ON r.Room_id = sb.Allocated_Room_id
   LEFT JOIN Hostel_Block hb ON hb.Block_id = r.Hostel_Block
-  LEFT JOIN Payment p ON p.Payment_id = sb.Payment_id
+  OUTER APPLY (
+    SELECT TOP 1
+      p.Payment_id,
+      p.PaymentStatus,
+      p.Verification_Status,
+      p.VerifiedAt,
+      p.Verified_At,
+      p.VerifiedBy,
+      p.Verified_By_Admin_Id,
+      p.Verification_Note,
+      p.Payment_Date,
+      p.[Month]
+    FROM Payment p
+    WHERE p.Payment_id = sb.Payment_id
+      OR p.Booking_Transaction_id = sb.Booking_Transaction_id
+    ORDER BY
+      CASE WHEN p.Payment_id = sb.Payment_id THEN 0 ELSE 1 END,
+      p.Payment_Date DESC,
+      p.Payment_id DESC
+  ) p
+  LEFT JOIN Users u ON u.id = COALESCE(p.VerifiedBy, p.Verified_By_Admin_Id)
 `;
 
 const getStudentById = (studentId) =>
@@ -1303,6 +1711,21 @@ const getPaymentById = (paymentId) =>
 const getBookingById = (bookingId) =>
   queryOne(`${bookingSelectQuery} WHERE sb.Booking_Transaction_id = @id`, (request) =>
     request.input("id", sql.Int, bookingId)
+  );
+
+const getBookingByPaymentId = (paymentId) =>
+  queryOne(
+    `
+      ${bookingSelectQuery}
+      WHERE sb.Payment_id = @paymentId
+         OR sb.Booking_Transaction_id = (
+              SELECT TOP 1 Booking_Transaction_id
+              FROM Payment
+              WHERE Payment_id = @paymentId
+            )
+      ORDER BY sb.Booked_At DESC, sb.Booking_Transaction_id DESC
+    `,
+    (request) => request.input("paymentId", sql.Int, paymentId)
   );
 
 const getStudentBookingsByStudentId = (studentId) =>
@@ -1890,30 +2313,42 @@ const sendAdminInviteEmail = async ({ email, token }) => {
     };
   }
 
-  await transport.sendMail({
-    from: process.env.MAIL_FROM || process.env.SMTP_USER,
-    to: email,
-    subject: "You're invited to join HostelMS as an admin",
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px;">
-        <h2 style="margin-bottom: 12px; color: #1E3A5F;">Admin invitation</h2>
-        <p style="color: #334155; line-height: 1.6;">
-          A Super Admin invited you to create a HostelMS admin account.
-        </p>
-        <p style="margin: 24px 0;">
-          <a
-            href="${registrationUrl}"
-            style="display: inline-block; padding: 12px 20px; border-radius: 10px; background: #1D4ED8; color: #FFFFFF; text-decoration: none; font-weight: 700;"
-          >
-            Complete Admin Registration
-          </a>
-        </p>
-        <p style="color: #475569; line-height: 1.6; word-break: break-all;">
-          If the button does not work, use this link:<br />${registrationUrl}
-        </p>
-      </div>
-    `,
-  });
+  try {
+    await transport.sendMail({
+      from: process.env.MAIL_FROM || process.env.SMTP_USER,
+      to: email,
+      subject: "You're invited to join HostelMS as an admin",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px;">
+          <h2 style="margin-bottom: 12px; color: #1E3A5F;">Admin invitation</h2>
+          <p style="color: #334155; line-height: 1.6;">
+            A Super Admin invited you to create a HostelMS admin account.
+          </p>
+          <p style="margin: 24px 0;">
+            <a
+              href="${registrationUrl}"
+              style="display: inline-block; padding: 12px 20px; border-radius: 10px; background: #1D4ED8; color: #FFFFFF; text-decoration: none; font-weight: 700;"
+            >
+              Complete Admin Registration
+            </a>
+          </p>
+          <p style="color: #475569; line-height: 1.6; word-break: break-all;">
+            If the button does not work, use this link:<br />${registrationUrl}
+          </p>
+        </div>
+      `,
+    });
+  } catch (error) {
+    const failureReason = error?.message || "SMTP delivery failed";
+    console.error(`Admin invite email delivery failed for ${email}: ${failureReason}`);
+
+    return {
+      delivered: false,
+      previewOnly: true,
+      registrationUrl,
+      failureReason,
+    };
+  }
 
   return {
     delivered: true,
@@ -2420,10 +2855,11 @@ const inviteAdmin = async (req, res) => {
   res.status(201).json({
     message: emailResult.delivered
       ? "Admin invitation sent successfully."
-      : "Invitation created. Configure SMTP to deliver emails automatically.",
+      : "Invitation created, but email delivery failed. Use the registration link below.",
     email,
     invitationSent: emailResult.delivered,
     registrationUrl: emailResult.previewOnly ? emailResult.registrationUrl : undefined,
+    deliveryError: emailResult.delivered ? undefined : emailResult.failureReason,
   });
 };
 
@@ -2903,6 +3339,19 @@ const getStudentDashboard = async (req, res) => {
   const pendingBookingCount = studentBookingRequests.filter(
     (booking) => booking.status === "Pending"
   ).length;
+  const pendingPaymentCount = studentBookingRequests.filter(
+    (booking) => booking.payment_status === "Pending"
+  ).length;
+  const completedApprovalRequests = studentBookingRequests.filter(
+    (booking) =>
+      booking.status === "Approved" && booking.payment_status === "Approved"
+  );
+  const workflowNotifications = completedApprovalRequests.slice(0, 3).map((booking) => ({
+    booking_id: booking.booking_id,
+    title: booking.room_title,
+    message: "Your room booking and payment have both been approved.",
+    approved_at: booking.payment_verified_at || booking.requested_at,
+  }));
 
   res.json({
     profile: {
@@ -2917,11 +3366,14 @@ const getStudentDashboard = async (req, res) => {
       approvedLeaves: 0,
       bookingRequests: studentBookingRequests.length,
       pendingBookings: pendingBookingCount,
+      pendingPaymentVerifications: pendingPaymentCount,
+      completedApprovals: completedApprovalRequests.length,
       roommates: roommateCount,
     },
     recentPayments: recentPayments.slice(0, 5),
     recentLeaveRequests: [],
     recentRoomBookings: studentBookingRequests.slice(0, 5),
+    workflowNotifications,
     roommateProfiles,
     bookings: studentBookings,
   });
@@ -2949,6 +3401,11 @@ protectedRouter.get(
         (SELECT COUNT(*) FROM Room WHERE Current_Occupancy < Capacity) AS availableRooms,
         CAST(0 AS INT) AS pendingMaintenance,
         (SELECT COUNT(*) FROM Student_Room_Booking WHERE Status = 'Pending') AS pendingBookingRequests,
+        (
+          SELECT COUNT(*)
+          FROM Payment
+          WHERE COALESCE(NULLIF(PaymentStatus, ''), Verification_Status, 'Pending') = 'Pending'
+        ) AS pendingPaymentRequests,
         (SELECT ISNULL(SUM(Amount), 0) FROM Payment) AS totalCollection
     `);
 
@@ -3052,9 +3509,20 @@ protectedRouter.put(
       return;
     }
 
-    if (normalizedStatus === "Approved" && !existingBooking.payment_id) {
-      res.status(400).json({ message: "A payment record is required before approval." });
-      return;
+    if (normalizedStatus === "Approved") {
+      if (!existingBooking.payment_id) {
+        res.status(400).json({ message: "A payment record is required before approval." });
+        return;
+      }
+
+      const normalizedPaymentStatus = normalizeApprovalStatus(existingBooking.payment_status);
+      if (normalizedPaymentStatus !== "Approved") {
+        res.status(409).json({
+          message:
+            "Payment is still pending. Approve the payment request first, then approve the booking.",
+        });
+        return;
+      }
     }
 
     let allocatedRoom = null;
@@ -3788,7 +4256,29 @@ protectedRouter.delete(
 protectedRouter.get(
   "/payments",
   asyncHandler(async (req, res) => {
-    const rows = await queryRows(`${paymentSelectQuery} ORDER BY p.Payment_Date DESC, p.Payment_id DESC`);
+    const requestedStatus = normalizeString(req.query.status);
+    const normalizedStatus = requestedStatus
+      ? PAYMENT_VERIFICATION_STATUSES.find(
+          (status) => status.toLowerCase() === requestedStatus.toLowerCase()
+        )
+      : null;
+
+    if (requestedStatus && !normalizedStatus) {
+      res.status(400).json({
+        message: `Invalid status. Allowed values: ${PAYMENT_VERIFICATION_STATUSES.join(", ")}.`,
+      });
+      return;
+    }
+
+    const whereClause = normalizedStatus
+      ? "WHERE COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') = @status"
+      : "";
+    const rows = await queryRows(
+      `${paymentSelectQuery} ${whereClause} ORDER BY p.Payment_Date DESC, p.Payment_id DESC`,
+      normalizedStatus
+        ? (request) => request.input("status", sql.NVarChar(20), normalizedStatus)
+        : undefined
+    );
 
     res.json(rows);
   })
@@ -3801,6 +4291,19 @@ protectedRouter.post(
     const amount = parsePositiveInt(req.body.amount);
     const paymentDate = parseDateValue(req.body.payment_date);
     const month = normalizeString(req.body.month);
+    const adminId = parsePositiveInt(req.user?.id);
+    const requestedStatus = normalizeString(
+      req.body.status ?? req.body.payment_status ?? req.body.verification_status ?? "Approved"
+    );
+    const normalizedStatus =
+      requestedStatus.toLowerCase() === "verified"
+        ? "Approved"
+        : PAYMENT_VERIFICATION_STATUSES.find(
+            (status) => status.toLowerCase() === requestedStatus.toLowerCase()
+          );
+    const verificationNote = normalizeNullableString(req.body.verification_note);
+    const reviewedAt = normalizedStatus === "Pending" ? null : new Date();
+    const reviewedBy = normalizedStatus === "Pending" ? null : adminId;
 
     if (!studentId) {
       res.status(400).json({ message: "Please choose a valid student." });
@@ -3822,6 +4325,13 @@ protectedRouter.post(
       return;
     }
 
+    if (!normalizedStatus) {
+      res.status(400).json({
+        message: `Invalid status. Allowed values: ${PAYMENT_VERIFICATION_STATUSES.join(", ")}.`,
+      });
+      return;
+    }
+
     const student = await queryOne(
       `SELECT Student_id AS student_id FROM ${STUDENT_TABLE} WHERE Student_id = @studentId`,
       (request) => request.input("studentId", sql.Int, studentId)
@@ -3836,8 +4346,34 @@ protectedRouter.post(
 
     await executeQuery(
       `
-        INSERT INTO Payment (Payment_id, Student_id, Amount, Payment_Date, [Month])
-        VALUES (@paymentId, @studentId, @amount, @paymentDate, @month)
+        INSERT INTO Payment (
+          Payment_id,
+          Student_id,
+          Amount,
+          Payment_Date,
+          [Month],
+          PaymentStatus,
+          Verification_Status,
+          VerifiedBy,
+          VerifiedAt,
+          Verified_By_Admin_Id,
+          Verified_At,
+          Verification_Note
+        )
+        VALUES (
+          @paymentId,
+          @studentId,
+          @amount,
+          @paymentDate,
+          @month,
+          @status,
+          @status,
+          @reviewedBy,
+          @reviewedAt,
+          @reviewedBy,
+          @reviewedAt,
+          @verificationNote
+        )
       `,
       (request) =>
         request
@@ -3846,6 +4382,10 @@ protectedRouter.post(
           .input("amount", sql.Int, amount)
           .input("paymentDate", sql.Date, paymentDate)
           .input("month", sql.NVarChar(20), month)
+          .input("status", sql.NVarChar(20), normalizedStatus)
+          .input("reviewedBy", sql.Int, reviewedBy)
+          .input("reviewedAt", sql.DateTime, reviewedAt)
+          .input("verificationNote", sql.NVarChar(250), verificationNote)
     );
 
     const payment = await getPaymentById(paymentId);
@@ -3956,6 +4496,230 @@ protectedRouter.delete(
     );
 
     res.json({ message: "Payment deleted successfully." });
+  })
+);
+
+// Verify payment (mark as received/verified)
+protectedRouter.put(
+  "/payments/:id/verify",
+  asyncHandler(async (req, res) => {
+    await ensureDefaultRoomInventory();
+    await refreshPublicRoomAvailability();
+
+    const paymentId = parsePositiveInt(req.params.id);
+    const adminId = parsePositiveInt(req.user?.id);
+
+    if (!paymentId) {
+      res.status(400).json({ message: "A valid payment ID is required." });
+      return;
+    }
+
+    if (!adminId) {
+      res.status(401).json({ message: "Admin authentication is required." });
+      return;
+    }
+
+    const existingPayment = await queryOne(
+      `
+        SELECT 
+          Payment_id AS payment_id,
+          COALESCE(NULLIF(PaymentStatus, ''), Verification_Status, 'Pending') AS payment_status,
+          Student_id AS student_id,
+          Booking_Transaction_id AS booking_transaction_id
+        FROM Payment 
+        WHERE Payment_id = @paymentId
+      `,
+      (request) => request.input("paymentId", sql.Int, paymentId)
+    );
+
+    if (!existingPayment) {
+      res.status(404).json({ message: "Payment not found." });
+      return;
+    }
+
+    const currentPaymentStatus = normalizeApprovalStatus(existingPayment.payment_status);
+    const isAlreadyApproved = currentPaymentStatus === "Approved";
+    const now = new Date();
+
+    if (!isAlreadyApproved) {
+      await executeQuery(
+        `
+          UPDATE Payment
+          SET PaymentStatus = 'Approved',
+              Verification_Status = 'Approved',
+              VerifiedBy = @adminId,
+              VerifiedAt = @verifiedAt,
+              Verified_By_Admin_Id = @adminId,
+              Verified_At = @verifiedAt
+          WHERE Payment_id = @paymentId
+        `,
+        (request) =>
+          request
+            .input("paymentId", sql.Int, paymentId)
+            .input("adminId", sql.Int, adminId)
+            .input("verifiedAt", sql.DateTime, now)
+      );
+    }
+
+    let booking = await getBookingByPaymentId(paymentId);
+
+    if (booking && booking.status === "Pending") {
+      const student = await queryOne(
+        `
+          SELECT
+            Student_id AS student_id,
+            Room_id AS room_id
+          FROM ${STUDENT_TABLE}
+          WHERE Student_id = @studentId
+        `,
+        (request) => request.input("studentId", sql.Int, booking.student_id)
+      );
+
+      if (!student) {
+        res.status(404).json({ message: "Student account not found for this payment request." });
+        return;
+      }
+
+      const allocatedRoom =
+        booking.allocated_room_id
+          ? await getRoomById(booking.allocated_room_id)
+          : await getPreferredAvailableRoomForCategory(booking.requested_room_category);
+
+      if (!allocatedRoom) {
+        await refreshPublicRoomAvailability({ force: true });
+        res.status(409).json({
+          message:
+            "Payment approved, but no physical room is currently available. Please refresh and try again.",
+        });
+        return;
+      }
+
+      const roomAvailability = await getRoomAvailability(allocatedRoom.room_id);
+      if (
+        !roomAvailability ||
+        Number(roomAvailability.current_occupancy || 0) >= Number(roomAvailability.capacity || 0)
+      ) {
+        await refreshPublicRoomAvailability({ force: true });
+        res.status(409).json({
+          message:
+            "Payment approved, but the room was just occupied. Refresh availability and accept again.",
+        });
+        return;
+      }
+
+      const pool = await getPool();
+      const transaction = new sql.Transaction(pool);
+      await transaction.begin();
+
+      try {
+        await transaction
+          .request()
+          .input("studentId", sql.Int, booking.student_id)
+          .input("roomId", sql.Int, allocatedRoom.room_id)
+          .query(`
+            UPDATE ${STUDENT_TABLE}
+            SET Room_id = @roomId
+            WHERE Student_id = @studentId
+          `);
+
+        await transaction
+          .request()
+          .input("bookingId", sql.Int, booking.booking_transaction_id)
+          .input("roomId", sql.Int, allocatedRoom.room_id)
+          .query(`
+            UPDATE Student_Room_Booking
+            SET Status = 'Approved',
+                Allocated_Room_id = @roomId
+            WHERE Booking_Transaction_id = @bookingId
+          `);
+
+        await transaction.commit();
+      } catch (transactionError) {
+        try {
+          await transaction.rollback();
+        } catch (rollbackError) {
+          // Ignore rollback errors and surface the original failure.
+        }
+        throw transactionError;
+      }
+
+      await reseedRoommatesForStudent(booking.student_id, allocatedRoom.room_id);
+      await syncRoomOccupancy([student.room_id, allocatedRoom.room_id]);
+      await refreshPublicRoomAvailability({ force: true });
+
+      booking = await getBookingById(booking.booking_transaction_id);
+    }
+
+    const payment = await getPaymentById(paymentId);
+    const workflowCompleted =
+      booking?.status === "Approved" && booking?.payment_status === "Approved";
+
+    res.json({
+      message: workflowCompleted
+        ? "Payment approved and room booking completed successfully."
+        : "Payment approved successfully.",
+      workflowCompleted,
+      payment,
+      booking,
+    });
+  })
+);
+
+// Reject payment
+protectedRouter.put(
+  "/payments/:id/reject",
+  asyncHandler(async (req, res) => {
+    const paymentId = parsePositiveInt(req.params.id);
+    const adminId = parsePositiveInt(req.user?.id);
+    const reason = normalizeNullableString(req.body.reason);
+
+    if (!paymentId) {
+      res.status(400).json({ message: "A valid payment ID is required." });
+      return;
+    }
+
+    if (!adminId) {
+      res.status(401).json({ message: "Admin authentication is required." });
+      return;
+    }
+
+    const existingPayment = await queryOne(
+      `
+        SELECT 
+          Payment_id AS payment_id,
+          COALESCE(NULLIF(PaymentStatus, ''), Verification_Status, 'Pending') AS payment_status
+        FROM Payment 
+        WHERE Payment_id = @paymentId
+      `,
+      (request) => request.input("paymentId", sql.Int, paymentId)
+    );
+
+    if (!existingPayment) {
+      res.status(404).json({ message: "Payment not found." });
+      return;
+    }
+
+    await executeQuery(
+      `
+        UPDATE Payment
+        SET PaymentStatus = 'Rejected',
+            Verification_Status = 'Rejected',
+            VerifiedBy = @adminId,
+            VerifiedAt = GETDATE(),
+            Verified_By_Admin_Id = @adminId,
+            Verified_At = GETDATE(),
+            Verification_Note = @reason
+        WHERE Payment_id = @paymentId
+      `,
+      (request) =>
+        request
+          .input("paymentId", sql.Int, paymentId)
+          .input("adminId", sql.Int, adminId || null)
+          .input("reason", sql.NVarChar(250), reason)
+    );
+
+    const payment = await getPaymentById(paymentId);
+    res.json({ message: "Payment rejected successfully.", payment });
   })
 );
 
@@ -4226,10 +4990,14 @@ app.post(
 
     const pendingBooking = await queryOne(
       `
-        SELECT TOP 1 Booking_Transaction_id AS booking_id
-        FROM Student_Room_Booking
-        WHERE Student_id = @studentId
-          AND Status = 'Pending'
+        SELECT TOP 1 sb.Booking_Transaction_id AS booking_id
+        FROM Student_Room_Booking sb
+        LEFT JOIN Payment p ON p.Payment_id = sb.Payment_id
+        WHERE sb.Student_id = @studentId
+          AND (
+            sb.Status = 'Pending'
+            OR COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') = 'Pending'
+          )
       `,
       (request) => request.input("studentId", sql.Int, studentId)
     );
@@ -4273,8 +5041,24 @@ app.post(
         .input("paymentDate", sql.Date, paymentDate)
         .input("month", sql.NVarChar(20), paymentMonth)
         .query(`
-          INSERT INTO Payment (Payment_id, Student_id, Amount, Payment_Date, [Month])
-          VALUES (@paymentId, @studentId, @amount, @paymentDate, @month)
+          INSERT INTO Payment (
+            Payment_id,
+            Student_id,
+            Amount,
+            Payment_Date,
+            [Month],
+            PaymentStatus,
+            Verification_Status
+          )
+          VALUES (
+            @paymentId,
+            @studentId,
+            @amount,
+            @paymentDate,
+            @month,
+            'Pending',
+            'Pending'
+          )
         `);
 
       const insertBookingResult = await transaction
@@ -4310,6 +5094,18 @@ app.post(
 
       bookingId = parsePositiveInt(insertBookingResult.recordset?.[0]?.booking_id);
 
+      if (bookingId) {
+        await transaction
+          .request()
+          .input("paymentId", sql.Int, paymentId)
+          .input("bookingId", sql.Int, bookingId)
+          .query(`
+            UPDATE Payment
+            SET Booking_Transaction_id = @bookingId
+            WHERE Payment_id = @paymentId
+          `);
+      }
+
       await transaction.commit();
     } catch (error) {
       try {
@@ -4325,8 +5121,10 @@ app.post(
     const booking = bookingId ? await getBookingById(bookingId) : null;
 
     res.status(201).json({
-      message: "Payment recorded. Your booking request is now pending admin approval.",
+      message:
+        "Payment request submitted. Booking and payment both need admin approval before completion.",
       bookingStatus: "Pending",
+      paymentStatus: "Pending",
       paymentMethod: cardLast4 ? `Card ending in ${cardLast4}` : "Card payment",
       booking,
       room: {
@@ -4452,10 +5250,14 @@ app.post(
 
     const pendingBooking = await queryOne(
       `
-        SELECT TOP 1 Booking_Transaction_id AS booking_id
-        FROM Student_Room_Booking
-        WHERE Student_id = @studentId
-          AND Status = 'Pending'
+        SELECT TOP 1 sb.Booking_Transaction_id AS booking_id
+        FROM Student_Room_Booking sb
+        LEFT JOIN Payment p ON p.Payment_id = sb.Payment_id
+        WHERE sb.Student_id = @studentId
+          AND (
+            sb.Status = 'Pending'
+            OR COALESCE(NULLIF(p.PaymentStatus, ''), p.Verification_Status, 'Pending') = 'Pending'
+          )
       `,
       (request) =>
         request
@@ -4518,7 +5320,8 @@ app.listen(PORT, () => {
     .then(() => refreshPublicRoomAvailability({ force: true }))
     .then(() => startPublicRoomAvailabilityRefreshLoop())
     .catch((error) => {
-      console.error("DB Connection Failed:", error.message);
+      console.error("DB Connection Failed:", error);
+      console.error(error.stack);
     });
 });
 

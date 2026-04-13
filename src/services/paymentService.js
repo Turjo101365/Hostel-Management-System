@@ -1,46 +1,30 @@
-import { mockPayments, mockStudents } from '../utils/mockData'
-
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+import api from './api'
 
 export const paymentService = {
-  getAll: async () => {
-    await delay(500)
-    return { data: mockPayments }
+  // Get all payment requests (admin view)
+  getAll: async ({ status } = {}) => {
+    const url = status ? `/payments?status=${encodeURIComponent(status)}` : '/payments'
+    const response = await api.get(url)
+    return response.data
   },
 
+  // Get payment by ID
   getById: async (id) => {
-    await delay(300)
-    const payment = mockPayments.find(p => p.id === id)
-    return { data: payment }
+    const response = await api.get(`/payments/${id}`)
+    return response.data
   },
 
-  create: async (data) => {
-    await delay(500)
-    const student = mockStudents.find(s => s.student_id === data.student_id)
-    const newPayment = {
-      ...data,
-      id: mockPayments.length + 1,
-      payment_id: `PAY00${mockPayments.length + 1}`,
-      student_name: student?.name || 'Unknown',
-      payment_date: new Date().toISOString().split('T')[0],
-      status: 'Paid'
-    }
-    return { data: newPayment }
+  // Verify payment (mark as received/verified)
+  verify: async (id) => {
+    const response = await api.put(`/payments/${id}/verify`)
+    return response.data
   },
 
-  update: async (id, data) => {
-    await delay(500)
-    const index = mockPayments.findIndex(p => p.id === id)
-    if (index !== -1) {
-      return { data: { ...mockPayments[index], ...data } }
-    }
-    throw new Error('Payment not found')
+  // Reject payment
+  reject: async (id, reason) => {
+    const response = await api.put(`/payments/${id}/reject`, { reason })
+    return response.data
   },
-
-  delete: async (id) => {
-    await delay(500)
-    return { data: { success: true } }
-  }
 }
 
 export default paymentService
