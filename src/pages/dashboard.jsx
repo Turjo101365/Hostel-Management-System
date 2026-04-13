@@ -56,6 +56,12 @@ const getBookingBadgeVariant = (status) => {
   return 'warning'
 }
 
+const getPaymentBadgeVariant = (status) => {
+  if (status === 'Approved') return 'success'
+  if (status === 'Rejected') return 'danger'
+  return 'warning'
+}
+
 const Dashboard = () => {
   const { user } = useAuth()
   const isSuperAdmin = user?.role === 'SuperAdmin'
@@ -66,19 +72,27 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteLoading, setInviteLoading] = useState(false)
+  const [inviteRegistrationUrl, setInviteRegistrationUrl] = useState('')
   const [approvingBookingId, setApprovingBookingId] = useState(null)
 
   const loadDashboard = async () => {
     setLoading(true)
 
     try {
-      const maintenancePromise = isSuperAdmin ? Promise.resolve([]) : maintenanceService.getAll()
-      const [summaryData, paymentsData, maintenanceData, bookingRequestsData] = await Promise.all([
+      const [summaryData, paymentsData, bookingRequestsData] = await Promise.all([
         dashboardService.getSummary(),
         paymentsService.getAll(),
-        maintenancePromise,
         bookingRequestsService.getAll({ status: 'Pending' }),
       ])
+
+      let maintenanceData = []
+      if (!isSuperAdmin) {
+        try {
+          maintenanceData = await maintenanceService.getAll()
+        } catch (maintenanceError) {
+          console.warn('Maintenance endpoint unavailable. Showing dashboard without maintenance feed.', maintenanceError)
+        }
+      }
 
       setSummary(summaryData)
       setPayments(paymentsData.slice(0, 5))
@@ -114,7 +128,13 @@ const Dashboard = () => {
 
     try {
       const response = await adminInviteService.create({ email: inviteEmail.trim() })
-      toast.success(response.message || 'Admin invitation sent.')
+      if (response.registrationUrl) {
+        setInviteRegistrationUrl(response.registrationUrl)
+        toast.success('Invitation created. Email failed, so use the fallback link shown below.')
+      } else {
+        setInviteRegistrationUrl('')
+        toast.success(response.message || 'Admin invitation sent.')
+      }
       setInviteEmail('')
     } catch (error) {
       const message = error.response?.data?.message || 'Failed to send admin invitation.'
@@ -194,6 +214,9 @@ const Dashboard = () => {
             <Badge className="bg-white/15 text-white border border-white/10">
               Pending bookings: {summary?.pendingBookingRequests || 0}
             </Badge>
+            <Badge className="bg-white/15 text-white border border-white/10">
+              Pending payments: {summary?.pendingPaymentRequests || 0}
+            </Badge>
             <Button variant="outline" className="border-white/30 text-white hover:bg-white hover:text-slate-900" onClick={loadDashboard}>
               Refresh Dashboard
             </Button>
@@ -257,7 +280,7 @@ const Dashboard = () => {
         <Card
           title="Recent Payments"
           subtitle={`Total collection: ${formatCurrency(summary?.totalCollection)}`}
-          action={<Link to="/admin/payments" className="text-sm text-primary dark:text-blue-400 hover:underline">View ledger</Link>}
+          action={<Link to="/admin/payments" className="text-sm text-primary dark:text-blue-400 hover:underline">Open requests</Link>}
         >
           <div className="space-y-3">
             {payments.length === 0 ? (
@@ -273,7 +296,7 @@ const Dashboard = () => {
                   </div>
                   <div className="text-right">
                     <p className="font-bold text-gray-900 dark:text-white">{formatCurrency(payment.amount)}</p>
-                    <Badge variant="success" className="mt-2">{payment.status}</Badge>
+                    <Badge variant={getPaymentBadgeVariant(payment.status)} className="mt-2">{payment.status}</Badge>
                   </div>
                 </div>
               ))
@@ -398,6 +421,11 @@ const Dashboard = () => {
           <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
             The invited admin will receive a registration link at `http://localhost:5173/admin/register?token=...`
           </p>
+          {inviteRegistrationUrl && (
+            <p className="mt-2 text-sm text-amber-600 dark:text-amber-300 break-all">
+              Email delivery is currently failing. Use this registration link manually: {inviteRegistrationUrl}
+            </p>
+          )}
         </Card>
       )}
     </div>

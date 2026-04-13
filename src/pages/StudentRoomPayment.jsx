@@ -226,7 +226,10 @@ const StudentRoomPayment = () => {
       clearBookingIntent()
       setSuccessPayload(response)
       setShowSuccessModal(true)
-      toast.success(response.message || 'Payment recorded. Your booking request is pending admin approval.')
+      toast.success(
+        response.message
+        || 'Payment request submitted. Booking and payment both require admin approval.'
+      )
       startRedirectCountdown()
     } catch (error) {
       const message = getApiErrorMessage(error, 'Unable to process payment right now.')
@@ -403,6 +406,9 @@ const StudentRoomPayment = () => {
               </p>
               <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
                 Payment recorded: {formatCurrency(successPayload.payment?.amount)} - {successPayload.paymentMethod || 'Card payment'}
+              </p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Final completion is shown after both booking and payment are approved by admin.
               </p>
             </div>
 

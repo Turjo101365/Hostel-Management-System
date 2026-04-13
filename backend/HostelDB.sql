@@ -141,14 +141,21 @@ GO
 
 -- ------------------ PAYMENT ------------------
 CREATE TABLE dbo.Payment (
-    Payment_id INT NOT NULL,
+    Payment_id INT IDENTITY(1,1) NOT NULL,
+    Booking_Transaction_id INT NULL,
     Student_id INT NOT NULL,
     Amount INT NOT NULL,
     Payment_Date DATE NOT NULL,
     [Month] NVARCHAR(20) NOT NULL,
+    PaymentStatus NVARCHAR(20) NOT NULL CONSTRAINT DF_Payment_Status DEFAULT 'Pending',
+    VerifiedBy INT NULL,
+    VerifiedAt DATETIME NULL,
+    CreatedAt DATETIME NOT NULL CONSTRAINT DF_Payment_CreatedAt DEFAULT GETDATE(),
     CONSTRAINT PK_Payment PRIMARY KEY (Payment_id),
     CONSTRAINT CK_Payment_Amount CHECK (Amount > 0),
-    CONSTRAINT FK_Payment_Student FOREIGN KEY (Student_id) REFERENCES dbo.Students(Student_id)
+    CONSTRAINT CK_Payment_Status CHECK (PaymentStatus IN ('Pending', 'Verified', 'Rejected')),
+    CONSTRAINT FK_Payment_Student FOREIGN KEY (Student_id) REFERENCES dbo.Students(Student_id),
+    CONSTRAINT FK_Payment_VerifiedBy FOREIGN KEY (VerifiedBy) REFERENCES dbo.Users(id)
 );
 GO
 
@@ -189,6 +196,9 @@ GO
 CREATE INDEX IX_Room_Hostel_Block ON dbo.Room (Hostel_Block);
 CREATE INDEX IX_Students_Room_id ON dbo.Students (Room_id);
 CREATE INDEX IX_Payment_Student_id ON dbo.Payment (Student_id);
+CREATE INDEX IX_Payment_Status ON dbo.Payment (PaymentStatus);
+CREATE INDEX IX_Payment_BookingId ON dbo.Payment (Booking_Transaction_id);
 CREATE INDEX IX_Public_Room_Showcase_Category_Sort ON dbo.Public_Room_Showcase (Category, Sort_Order);
 CREATE INDEX IX_Student_Room_Booking_Student ON dbo.Student_Room_Booking (Student_id, Booked_At DESC);
+CREATE INDEX IX_Student_Room_Booking_Status ON dbo.Student_Room_Booking (Status);
 GO

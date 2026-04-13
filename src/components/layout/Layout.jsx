@@ -12,7 +12,7 @@ const pageTitles = {
   '/admin/rooms': 'Room Directory',
   '/admin/blocks': 'Hostel Blocks',
   '/admin/bookings': 'Booking Transactions',
-  '/admin/payments': 'Payment Ledger',
+  '/admin/payments': 'Payment Requests',
   '/admin/fees': 'Fee Structure',
   '/admin/mess': 'Mess Menu',
   '/admin/maintenance': 'Maintenance Tracker',

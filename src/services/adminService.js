@@ -72,10 +72,21 @@ export const blocksService = {
 }
 
 export const paymentsService = {
-  getAll: () => fetchResource('/payments'),
+  getAll: (params) =>
+    fetchResource(
+      params?.status ? `/payments?status=${encodeURIComponent(params.status)}` : '/payments'
+    ),
   create: (payload) => createResource('/payments', payload),
   update: (id, payload) => updateResource('/payments', id, payload),
   remove: (id) => deleteResource('/payments', id),
+  verify: async (id) => {
+    const response = await api.put(`/payments/${encodeURIComponent(id)}/verify`)
+    return response.data
+  },
+  reject: async (id, payload = {}) => {
+    const response = await api.put(`/payments/${encodeURIComponent(id)}/reject`, payload)
+    return response.data
+  },
 }
 
 export const bookingsService = {
