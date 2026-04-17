@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import {
   BadgeCheck,
   BedDouble,
-  CalendarDays,
   ClipboardList,
   CreditCard,
   UserCircle2,
@@ -18,7 +17,6 @@ import studentPortalService from '../services/studentPortalService'
 const summaryTone = [
   'bg-sky-500',
   'bg-emerald-500',
-  'bg-amber-500',
   'bg-violet-500',
 ]
 
@@ -119,7 +117,6 @@ const StudentDashboard = () => {
   const profile = dashboard?.profile || {}
   const summary = dashboard?.summary || {}
   const recentPayments = dashboard?.recentPayments || []
-  const recentLeaveRequests = dashboard?.recentLeaveRequests || []
   const roommateProfiles = dashboard?.roommateProfiles || []
   const bookings = dashboard?.bookings || []
   const recentRoomBookings = dashboard?.recentRoomBookings || []
@@ -140,7 +137,6 @@ const StudentDashboard = () => {
   const summaryCards = [
     { label: 'Payment Records', value: summary.paymentRecords || 0, note: 'Saved against your account', icon: CreditCard },
     { label: 'Total Paid', value: formatCurrency(summary.totalPaid), note: 'Collected hostel payments', icon: BadgeCheck },
-    { label: 'Pending Leaves', value: summary.pendingLeaves || 0, note: 'Waiting for approval', icon: CalendarDays },
     {
       label: 'Booking Requests',
       value: summary.bookingRequests || recentRoomBookings.length,
@@ -161,7 +157,7 @@ const StudentDashboard = () => {
               Welcome back, {profile.name || 'Student'}
             </h1>
             <p className="mt-3 max-w-xl text-sm text-white/80 lg:text-base">
-              Check your room assignment, payment history, and leave activity from one student portal.
+              Check your room assignment, payment history, and booking activity from one student portal.
             </p>
           </div>
 
@@ -207,7 +203,7 @@ const StudentDashboard = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {summaryCards.map((card, index) => (
           <Card key={card.label} className="border-0 shadow-md">
             <div className="flex items-start justify-between">
@@ -420,57 +416,32 @@ const StudentDashboard = () => {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card title="Recent Payments" subtitle="Latest payment history for your account">
-          <div className="space-y-3">
-            {recentPayments.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">No payment records are available yet.</p>
-            ) : (
-              recentPayments.map((payment) => (
-                <div key={payment.payment_id} className="flex items-center justify-between rounded-2xl bg-gray-50 p-4 dark:bg-slate-700/50">
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-white">{payment.month}</p>
-                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      Paid on {formatDate(payment.payment_date)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-gray-900 dark:text-white">{formatCurrency(payment.amount)}</p>
-                    <Badge variant={getPaymentBadgeVariant(payment.status)} className="mt-2">
-                      {getPaymentStatusLabel(payment.status)}
-                    </Badge>
-                  </div>
+      <Card title="Recent Payments" subtitle="Latest payment history for your account">
+        <div className="space-y-3">
+          {recentPayments.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">No payment records are available yet.</p>
+          ) : (
+            recentPayments.map((payment) => (
+              <div key={payment.payment_id} className="flex items-center justify-between rounded-2xl bg-gray-50 p-4 dark:bg-slate-700/50">
+                <div>
+                  <p className="font-semibold text-gray-900 dark:text-white">{payment.month}</p>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Paid on {formatDate(payment.payment_date)}
+                  </p>
                 </div>
-              ))
-            )}
-          </div>
-        </Card>
-
-        <Card title="Leave Requests" subtitle="Your latest leave activity">
-          <div className="space-y-3">
-            {recentLeaveRequests.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">No leave requests have been recorded yet.</p>
-            ) : (
-              recentLeaveRequests.map((leave) => (
-                <div key={leave.leave_id} className="rounded-2xl bg-gray-50 p-4 dark:bg-slate-700/50">
-                  <div className="flex items-center justify-between">
-                    <p className="font-semibold text-gray-900 dark:text-white">
-                      {formatDate(leave.from_date)} to {formatDate(leave.to_date)}
-                    </p>
-                    <Badge variant={leave.status === 'Approved' ? 'success' : leave.status === 'Rejected' ? 'danger' : 'warning'}>
-                      {leave.status}
-                    </Badge>
-                  </div>
-                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{leave.reason}</p>
+                <div className="text-right">
+                  <p className="font-bold text-gray-900 dark:text-white">{formatCurrency(payment.amount)}</p>
+                  <Badge variant={getPaymentBadgeVariant(payment.status)} className="mt-2">
+                    {getPaymentStatusLabel(payment.status)}
+                  </Badge>
                 </div>
-              ))
-            )}
-          </div>
-        </Card>
-      </div>
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
     </div>
   )
 }
 
 export default StudentDashboard
-

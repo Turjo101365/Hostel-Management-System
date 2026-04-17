@@ -25,6 +25,7 @@ const ResetPassword = () => {
 
   const emailSent = location.state?.emailSent
   const previewResetCode = location.state?.previewResetCode
+  const deliveryError = location.state?.deliveryError
   const expiresAt = location.state?.expiresAt
 
   useEffect(() => {
@@ -136,9 +137,16 @@ const ResetPassword = () => {
             <div className="mb-5 p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/40">
               <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
                 {emailSent === false
-                  ? 'SMTP email is not configured yet, so a development reset code is shown below.'
+                  ? deliveryError
+                    ? 'SMTP delivery failed, so a development reset code is shown below.'
+                    : 'SMTP email is not configured yet, so a development reset code is shown below.'
                   : `A reset code was sent to ${formData.email}.`}
               </p>
+              {deliveryError && (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                  Delivery issue: {deliveryError}
+                </p>
+              )}
               {expiresAt && (
                 <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">
                   Code expires at {new Date(expiresAt).toLocaleString()}.

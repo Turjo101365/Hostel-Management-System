@@ -54,6 +54,10 @@ const ProfileSettings = () => {
       nextErrors.phoneNumber = 'Please enter a valid phone number.'
     }
 
+    if (isStudent && formData.guardianContact.trim() && !validatePhone(formData.guardianContact.trim())) {
+      nextErrors.guardianContact = 'Please enter a valid guardian phone number.'
+    }
+
     setErrors(nextErrors)
     return Object.keys(nextErrors).length === 0
   }

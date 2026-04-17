@@ -93,6 +93,6 @@ export const validateEmail = (email) => {
 }
 
 export const validatePhone = (phone) => {
-  const regex = /^\+?[\d\s-]{10,}$/
+  const regex = /^\+?[\d\s()-]{7,20}$/
   return regex.test(phone)
 }

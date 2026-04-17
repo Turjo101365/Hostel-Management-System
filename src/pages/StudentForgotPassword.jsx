@@ -55,6 +55,7 @@ const StudentForgotPassword = () => {
           email: formData.email,
           emailSent: data.emailSent,
           previewResetCode: data.previewResetCode,
+          deliveryError: data.deliveryError,
           expiresAt: data.expiresAt,
         },
       })

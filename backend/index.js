@@ -2236,28 +2236,62 @@ const hashResetCode = (code) =>
 const generateResetCode = () =>
   String(Math.floor(100000 + Math.random() * 900000));
 
+const getClientOrigin = () =>
+  normalizeString(process.env.CLIENT_ORIGIN) || "http://localhost:5173";
+
+const getNormalizedSmtpService = () =>
+  normalizeString(process.env.SMTP_SERVICE);
+
+const getNormalizedSmtpHost = () =>
+  normalizeString(process.env.SMTP_HOST);
+
+const getNormalizedSmtpUser = () =>
+  normalizeString(process.env.SMTP_USER);
+
+const getNormalizedSmtpPassword = () => {
+  const password = String(process.env.SMTP_PASS || "").trim();
+
+  if (!password) {
+    return "";
+  }
+
+  const service = getNormalizedSmtpService().toLowerCase();
+  const host = getNormalizedSmtpHost().toLowerCase();
+  const isGoogleMailProvider =
+    service === "gmail" ||
+    host.includes("gmail.com") ||
+    host.includes("googlemail.com");
+
+  return isGoogleMailProvider ? password.replace(/\s+/g, "") : password;
+};
+
 const createMailTransport = () => {
-  if (process.env.SMTP_SERVICE && process.env.SMTP_USER && process.env.SMTP_PASS) {
+  const service = getNormalizedSmtpService();
+  const host = getNormalizedSmtpHost();
+  const user = getNormalizedSmtpUser();
+  const pass = getNormalizedSmtpPassword();
+
+  if (service && user && pass) {
     return nodemailer.createTransport({
-      service: process.env.SMTP_SERVICE,
+      service,
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
+        user,
+        pass,
       },
     });
   }
 
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+  if (!host || !user || !pass) {
     return null;
   }
 
   return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
+    host,
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === "true",
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+      user,
+      pass,
     },
   });
 };
@@ -2272,28 +2306,39 @@ const sendResetEmail = async ({ email, code, expiresAt }) => {
     };
   }
 
-  await transport.sendMail({
-    from: process.env.MAIL_FROM || process.env.SMTP_USER,
-    to: email,
-    subject: "HostelMS password reset code",
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px;">
-        <h2 style="margin-bottom: 12px; color: #1E3A5F;">Reset your HostelMS password</h2>
-        <p style="color: #334155; line-height: 1.6;">
-          Use the verification code below in the Reset Password screen.
-        </p>
-        <div style="margin: 24px 0; padding: 16px; border-radius: 12px; background: #EFF6FF; text-align: center;">
-          <span style="font-size: 30px; letter-spacing: 6px; font-weight: 700; color: #1D4ED8;">${code}</span>
+  try {
+    await transport.sendMail({
+      from: process.env.MAIL_FROM || process.env.SMTP_USER,
+      to: email,
+      subject: "HostelMS password reset code",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px;">
+          <h2 style="margin-bottom: 12px; color: #1E3A5F;">Reset your HostelMS password</h2>
+          <p style="color: #334155; line-height: 1.6;">
+            Use the verification code below in the Reset Password screen.
+          </p>
+          <div style="margin: 24px 0; padding: 16px; border-radius: 12px; background: #EFF6FF; text-align: center;">
+            <span style="font-size: 30px; letter-spacing: 6px; font-weight: 700; color: #1D4ED8;">${code}</span>
+          </div>
+          <p style="color: #475569; line-height: 1.6;">
+            This code expires at ${expiresAt.toLocaleString()}.
+          </p>
+          <p style="color: #64748B; font-size: 14px; line-height: 1.6;">
+            If you did not request a password reset, you can safely ignore this email.
+          </p>
         </div>
-        <p style="color: #475569; line-height: 1.6;">
-          This code expires at ${expiresAt.toLocaleString()}.
-        </p>
-        <p style="color: #64748B; font-size: 14px; line-height: 1.6;">
-          If you did not request a password reset, you can safely ignore this email.
-        </p>
-      </div>
-    `,
-  });
+      `,
+    });
+  } catch (error) {
+    const failureReason = error?.message || "SMTP delivery failed";
+    console.error(`Password reset email delivery failed for ${email}: ${failureReason}`);
+
+    return {
+      delivered: false,
+      previewOnly: true,
+      failureReason,
+    };
+  }
 
   return {
     delivered: true,
@@ -2303,7 +2348,7 @@ const sendResetEmail = async ({ email, code, expiresAt }) => {
 
 const sendAdminInviteEmail = async ({ email, token }) => {
   const transport = createMailTransport();
-  const registrationUrl = `http://localhost:5173/admin/register?token=${token}`;
+  const registrationUrl = `${getClientOrigin()}/admin/register?token=${token}`;
 
   if (!transport) {
     return {
@@ -2659,6 +2704,7 @@ const forgotPassword = async (req, res) => {
     email,
     emailSent: emailResult.delivered,
     previewResetCode: emailResult.previewOnly ? resetCode : undefined,
+    deliveryError: emailResult.delivered ? undefined : emailResult.failureReason,
     expiresAt: expiresAt.toISOString(),
   });
 };
@@ -3125,6 +3171,7 @@ const forgotStudentPassword = async (req, res) => {
     email,
     emailSent: emailResult.delivered,
     previewResetCode: emailResult.previewOnly ? resetCode : undefined,
+    deliveryError: emailResult.delivered ? undefined : emailResult.failureReason,
     expiresAt: expiresAt.toISOString(),
   });
 };
@@ -3242,6 +3289,11 @@ const updateStudentProfile = async (req, res) => {
 
   if (phoneNumber && !validatePhoneNumber(phoneNumber)) {
     res.status(400).json({ message: "Please enter a valid phone number." });
+    return;
+  }
+
+  if (guardianContact && !validatePhoneNumber(guardianContact)) {
+    res.status(400).json({ message: "Please enter a valid guardian phone number." });
     return;
   }
 

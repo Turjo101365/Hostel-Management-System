@@ -73,6 +73,7 @@ const Dashboard = () => {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteRegistrationUrl, setInviteRegistrationUrl] = useState('')
+  const [inviteDeliveryError, setInviteDeliveryError] = useState('')
   const [approvingBookingId, setApprovingBookingId] = useState(null)
 
   const loadDashboard = async () => {
@@ -130,9 +131,11 @@ const Dashboard = () => {
       const response = await adminInviteService.create({ email: inviteEmail.trim() })
       if (response.registrationUrl) {
         setInviteRegistrationUrl(response.registrationUrl)
+        setInviteDeliveryError(response.deliveryError || '')
         toast.success('Invitation created. Email failed, so use the fallback link shown below.')
       } else {
         setInviteRegistrationUrl('')
+        setInviteDeliveryError('')
         toast.success(response.message || 'Admin invitation sent.')
       }
       setInviteEmail('')
@@ -419,12 +422,19 @@ const Dashboard = () => {
             </Button>
           </form>
           <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
-            The invited admin will receive a registration link at `http://localhost:5173/admin/register?token=...`
+            The invited admin will receive a registration link based on the configured frontend origin.
           </p>
           {inviteRegistrationUrl && (
-            <p className="mt-2 text-sm text-amber-600 dark:text-amber-300 break-all">
-              Email delivery is currently failing. Use this registration link manually: {inviteRegistrationUrl}
-            </p>
+            <div className="mt-2 space-y-2">
+              <p className="text-sm text-amber-600 dark:text-amber-300 break-all">
+                Email delivery is currently failing. Use this registration link manually: {inviteRegistrationUrl}
+              </p>
+              {inviteDeliveryError && (
+                <p className="text-xs text-amber-700 dark:text-amber-200 break-all">
+                  Delivery issue: {inviteDeliveryError}
+                </p>
+              )}
+            </div>
           )}
         </Card>
       )}
